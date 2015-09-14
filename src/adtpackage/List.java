@@ -52,6 +52,8 @@ public class List implements Printable {
     }
 
     public <T extends Printable> void insertAsNode(T data, int node) {
+        // insert the data to be the node at specified index
+        // whatever might have been there is moved back
         if (node == 0) {
             insertAtFront(data);
         } else if((!isEmpty()) && (node < size)) {

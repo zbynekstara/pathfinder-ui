@@ -5,20 +5,23 @@ import adtpackage.*;
 
 /**
  *
- * @author Zbynda
+ * @author Zbyněk Stara
  */
 public class Reservation implements Printable {
     private ReservationType type;
     private Element thisElement;
 
     private FARAgent agent = null;
-    private int reservationIndex = -1;
-    private int step = -1;
+    private int reservationIndex = -1; // where in the sequence of reservation is this one
+    private int step = -1; // which step does this one represent
     private Reservation previousReservation = null;
 
-    private List reservationPath; // the path that the agent will get if this reservation is honored
+    private boolean isComplete;
+    private boolean isFailure;
 
-    private Reservation dependentReservation;
+    //private List reservationPath; // the path that the agent will get if this reservation is honored
+
+    private Reservation dependentReservation; // reservation that will only be honored if this one is
 
     private Reservation ghostReservation; // reservation to prevent head-on collisions or corridor collisions
     private Reservation originalReservation;
@@ -85,7 +88,7 @@ public class Reservation implements Printable {
         return originalReservation;
     }
 
-    public void setReservationPath(List reservationPath) {
+    /*public void setReservationPath(List reservationPath) {
         this.reservationPath = reservationPath;
     }
     public List getReservationPath() { // RETURNING A COPY, NOT THE PATH ITSELF
@@ -96,7 +99,11 @@ public class Reservation implements Printable {
         }
 
         return returnPath;
-    }
+    }*/
+    /*public Element getReservationElement(int step) {
+        Element reservationElement = (Element) reservationPath.getNodeData(step);
+        return reservationElement;
+    }*/
 
     public Element getCameFrom() {
         return previousReservation.getElement();

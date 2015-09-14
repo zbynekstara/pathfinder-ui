@@ -81,8 +81,8 @@ public class FARPathfinder implements Pathfinder {
 
     public final int RESERVATION_DEPTH = 3; // FAR's k parameter - reservation depth
 
-    private GUI gui;
-    private Field field;
+    private final GUI gui;
+    private final Field field;
     private final FARPathfinder thisPathfinder = this;
 
     private AllocationWorker aw; // allocation worker to handle the allocation in the background
@@ -133,8 +133,8 @@ public class FARPathfinder implements Pathfinder {
             farAgentGroups[i] = new TreeSet();
         }
         TreeSet ungrouppedSet = new TreeSet();
-        for (int i = 0; i < farAgents.length; i++) {
-            ungrouppedSet.add(farAgents[i], farAgents[i].FARAGENT_ID);
+        for (FARAgent currentAgent : farAgents) {
+            ungrouppedSet.add(currentAgent, currentAgent.FARAGENT_ID);
         }
 
         // intitialize the farAgentGroupsArray with randomly selected sets of farAgents
@@ -154,24 +154,32 @@ public class FARPathfinder implements Pathfinder {
             if (currentGroupNum == RESERVATION_DEPTH) currentGroupNum = 0;
         }
 
-        System.out.println("Reserving now");
-        for (simStep = 0; simStep < FAILURE_CRITERION; simStep++) { // simStep 0 is the start element for all of them - simStep 1 is the first where reservation is needed
+        // coordination stage
+        System.out.println("Coordination stage");
+        for (simStep = 0; simStep < FAILURE_CRITERION; simStep++) {
+            // simStep 0 is the initial reservation step for all agents
+            // simStep 1 is the first step for which real reservations are needed
+
+            // initialization
             aw.firePropertyChange("update", simStep-1, simStep);
             System.out.println("Step: "+simStep);
-            int agentGroupForStep = (simStep-1) % RESERVATION_DEPTH;
 
+            int agentGroupForStep = (simStep-1) % RESERVATION_DEPTH; // each step only sees coordination from a portion of agents
+
+            // randomization of agents
             agentReservationOrderAtStep = new MinimalQueue(); // it is necessary to mix up the agent reservation order
-
-            MaximalQueue unassignedAgents = new MaximalQueue(); // adding initial ones
+            MaximalQueue unassignedAgents = new MaximalQueue(); // queue of agents awaiting assignment to reservation order
 
             if (simStep == 0) {
+                // if this is step 0, enqueue everyone for initial reservation order assignment
                 for (int i = simStep; i < farAgentGroups.length; i++) {
                     for (int j = 0; j < farAgentGroups[i].size(); j++) {
                         unassignedAgents.enqueue((FARAgent) farAgentGroups[i].getNodeData(j), ((FARAgent) farAgentGroups[i].getNodeData(j)).FARAGENT_ID);
                     }
                 }
             } else if (simStep > 0) {
-                for (int i = 0; i < farAgentGroups[agentGroupForStep].size(); i++) { // adding normal ones
+                // if this is not step 0, enqueue only agents from the appropriate agent group
+                for (int i = 0; i < farAgentGroups[agentGroupForStep].size(); i++) {
                     unassignedAgents.enqueue((FARAgent) farAgentGroups[agentGroupForStep].getNodeData(i), ((FARAgent) farAgentGroups[agentGroupForStep].getNodeData(i)).FARAGENT_ID);
                 }
             }
@@ -179,57 +187,98 @@ public class FARPathfinder implements Pathfinder {
             while (!unassignedAgents.isEmpty()) {
                 FARAgent chosenAgent = null;
                 do {
-                    int randomAgentIndex = (int) (Math.random() * (unassignedAgents.size()));
-                    double randomAgentKey = unassignedAgents.getNodeKey(randomAgentIndex);
-                    chosenAgent = (FARAgent) unassignedAgents.remove(randomAgentKey);
-                } while (chosenAgent == null);
+                    int randomAgentIndex = (int) (Math.random() * (unassignedAgents.size())); // get a random index
+                    double randomAgentKey = unassignedAgents.getNodeKey(randomAgentIndex); // identify an agent
+                    chosenAgent = (FARAgent) unassignedAgents.remove(randomAgentKey); // get the agent
+                } while (chosenAgent == null); // the above procedure may fail
 
-                agentReservationOrderAtStep.enqueue(chosenAgent, simStep);
+                agentReservationOrderAtStep.enqueue(chosenAgent, simStep); // enqueue the chosen agent into reservation order
             }
 
-            // RESERVING
+            // reserving
+            // during this part of the algrithm, some agents look ahead (up to RESERVATION_DEPTH steps) and reserve their required paths
+            // this is different from the next step of the algorithm, where all agents actually perform the reservation at the current simStep
             while (!agentReservationOrderAtStep.isEmpty()) {
+                // while there are agents to reserve for
                 FARAgent currentAgent = (FARAgent) agentReservationOrderAtStep.dequeue();
 
                 Reservation previousReservation = currentAgent.getLastReservation();
 
-                int resStep;
+                // initializing
+                int resStep; // reservation step
+                // this is different from the simStep
+                // resStep can be up to RESERVATION_DEPTH larger than simStep
 
                 if (previousReservation == null) resStep = 0;
                 else resStep = previousReservation.getStep() + 1;
 
-                int reservationIndex = RESERVATION_DEPTH - currentAgent.getAgentGroup() - 1;
-                if (currentAgent.getLastReservation() != null) reservationIndex = (previousReservation.getReservationIndex() + 1) % RESERVATION_DEPTH;
+                int reservationIndex; // how many steps ahead should we plan
 
-                System.out.println("\t\tCurrent agent: "+currentAgent.FARAGENT_ID+" ("+reservationIndex+")");
+                if (currentAgent.getLastReservation() == null) reservationIndex = RESERVATION_DEPTH - currentAgent.getAgentGroup() - 1;
+                // if this is the first time we reserve, reserve 1-RESERVATION_DEPTH steps
+                else reservationIndex = (previousReservation.getReservationIndex() + 1) % RESERVATION_DEPTH;
+                // if this is during normal reservations, reserve for the correct number of steps according to previous reservation
 
+                System.out.println("\t\tCurrent agent: "+currentAgent.FARAGENT_ID+" (G: "+currentAgent.getAgentGroup()+", RI: "+reservationIndex+")");
+
+                // making the actual reservations
                 if ((currentAgent.getLastReservation() == null) || (simStep <= currentAgent.getAgentGroup() && currentAgent.getLastReservation().isInitialReservation())) {
+                    // if this is the very first reservation
+                    // or the simStep is lower than the agentGroup and previous reservation was initial
+
                     reserve(currentAgent, ReservationType.INITIAL, previousReservation);
-                    if ((RESERVATION_DEPTH - reservationIndex - 1) != 0) { // go up to reservationindex with the reservation, but not beyond
+
+                    if ((RESERVATION_DEPTH - reservationIndex - 1) > 0) { // THIS WAS !=
+                        // add the agent back to the reservation order to get another initial reservation as needed
                         agentReservationOrderAtStep.enqueue(currentAgent, resStep);
-                    } else { // to delete extraneous assignments when an agent is reassigned in the meantime
-                        while (agentReservationOrderAtStep.search(currentAgent) != -1) {
+                    } else {
+                        // normally, this would do nothing
+                        // but reassignments make it possible for a proxy reservation to be made before some of the later initial reservations are made
+                        // that would increase the reservation index
+                        // thus, it may be required to delete this extra initial assignment
+                        while (agentReservationOrderAtStep.search(currentAgent) != -1) { // -1 means it was not found
                             System.out.println("\t\tDeleting extra assignment of agent "+currentAgent.FARAGENT_ID);
                             agentReservationOrderAtStep.delete(currentAgent);
                         }
                     }
-                } else if (resStep < FAILURE_CRITERION) { // TO ENSURE WE DON'T TRY TO RESERVE AT IMPOSSIBLE STEPS
+
+                } else if (resStep < FAILURE_CRITERION) {
+                    // normal reservation
+                    // we have to end before resStep reaches failure criterion
+                    // we do not want to try to reserve at impossible times
+
                     if (resStep < previousReservation.getReservationPath().size()) {
+                        // if resStep is smaller than the size of the reservation path
+                        // we still have stuff to do
+
                         reserve(currentAgent, ReservationType.NORMAL, previousReservation);
-                        if ((RESERVATION_DEPTH - reservationIndex - 1) != 0) { // go up to reservationindex with the reservation, but not beyond
+
+                        if ((RESERVATION_DEPTH - reservationIndex - 1) > 0) { // SHOULD THIS BE > ?
+                            // if there are still reservations to be made, put the agent back in reservation order
                             agentReservationOrderAtStep.enqueue(currentAgent, resStep);
-                        } else { // to delete extraneous assignments when an agent is reassigned in the meantime
-                            while (agentReservationOrderAtStep.search(currentAgent) != -1) {
+                        } else {
+                            // normally, this would do nothing
+                            // but it is possible for proxy assignments to be made before this happens
+                            // then the reservation index would be bigger
+                            // and thus the extra assignemnts would need to be scrapped
+                            while (agentReservationOrderAtStep.search(currentAgent) != -1) { // -1 means not found
                                 System.out.println("\t\tDeleting extra assignment of agent "+currentAgent.FARAGENT_ID);
                                 agentReservationOrderAtStep.delete(currentAgent);
                             }
                         }
-                    } else { // end waiting
+
+                    } else {
+                        // if this step is after the end of the reservation path
+                        // end by waiting at the finish point
+
                         reserve(currentAgent, ReservationType.WAIT, previousReservation);
-                        if ((RESERVATION_DEPTH - reservationIndex - 1) != 0) { // go up to reservationindex with the reservation, but not beyond
+
+                        if ((RESERVATION_DEPTH - reservationIndex - 1) > 0) {
+                            // if there are still some resSteps for which to reserve
+                            // add the agent back to reservation order
                             agentReservationOrderAtStep.enqueue(currentAgent, resStep);
-                        } else { // to delete extraneous assignments when an agent is reassigned in the meantime
-                            while (agentReservationOrderAtStep.search(currentAgent) != -1) {
+                        } else {
+                            while (agentReservationOrderAtStep.search(currentAgent) != -1) { // -1 means not found
                                 System.out.println("\t\tDeleting extra assignment of agent "+currentAgent.FARAGENT_ID);
                                 agentReservationOrderAtStep.delete(currentAgent);
                             }
@@ -238,13 +287,16 @@ public class FARPathfinder implements Pathfinder {
                 }
             }
 
-            System.out.println("\tChanging paths");
-            for (int agentCounter = 0; agentCounter < farAgents.length; agentCounter++) {
-                FARAgent currentAgent = (FARAgent) farAgents[agentCounter];
+            // Moving agents
+            System.out.println("\tMoving agents");
+            for (FARAgent currentAgent : farAgents) {
+                // going through all agents
 
                 System.out.println("\t\tAdjusting path of agent "+currentAgent.FARAGENT_ID+"");
 
                 System.out.println("\t\t\tLast honored reservation: "+currentAgent.getLastHonoredReservation());
+                
+                // perform the reservation that is lined up for this agent
                 Reservation reservationToHonor = null;
                 if (currentAgent.getLastHonoredReservation() == null) reservationToHonor = currentAgent.getFirstReservation(); // first reservation
                 else reservationToHonor = currentAgent.getLastHonoredReservation().getDependentReservation();
@@ -254,6 +306,7 @@ public class FARPathfinder implements Pathfinder {
 
                 currentAgent.setLastHonoredReservation(reservationToHonor);
 
+                // if this is the last element of the agent's path, finish
                 Element currentElement = currentAgent.getPathElement(simStep);
                 if (currentElement == currentAgent.GOAL && !currentAgent.isComplete()) {
                     System.out.println("\t\tSuccess for agent: "+currentAgent.FARAGENT_ID);
@@ -263,12 +316,11 @@ public class FARPathfinder implements Pathfinder {
             }
         }
 
+        // wrap up afer all simSteps are exhausted
         System.out.println("After coordination stage");
-        for (int i = 0; i < farAgents.length; i++) {
-            FARAgent currentAgent = farAgents[i];
-
+        for (FARAgent currentAgent : farAgents) {
             if (!currentAgent.isComplete()) {
-                currentAgent.getPathElement(FAILURE_CRITERION - 1).getFARExtension().setIsFailure(true);
+                //currentAgent.getPathElement(FAILURE_CRITERION - 1).getFARExtension().setIsFailure(true);
                 System.out.println("\tFailure for agent: "+currentAgent.FARAGENT_ID);
                 numFailures += 1;
             }
@@ -277,13 +329,14 @@ public class FARPathfinder implements Pathfinder {
         System.out.println("Number of failures: "+numFailures);
     }
 
+    // draw method for gui
     public Element [] getAgentsAtStep(int drawStep) { // returns an array of elements
         Element [] elementArray = new Element[farAgents.length];
 
         for (int i = 0; i < farAgents.length; i++) {
             FARAgent currentAgent = farAgents[i];
-            if (drawStep < currentAgent.getAgentPath().size()) {
-                elementArray[i] = (Element) currentAgent.getAgentPath().getNodeData(drawStep);
+            if (drawStep < currentAgent.getFinalAgentPathSize()) { // this should not be a thing
+                elementArray[i] = (Element) currentAgent.getFinalPathElement(drawStep);
             } else {
                 elementArray[i] = currentAgent.GOAL;
             }
@@ -292,12 +345,13 @@ public class FARPathfinder implements Pathfinder {
         return elementArray;
     }
 
+    // draw method for gui
     public List [] getAgentPathsUntilStep(int drawStep) { // returns an array of lists
         List[] pathArray = new List[farAgents.length];
 
         for (int i = 0; i < farAgents.length; i++) {
             FARAgent currentAgent = farAgents[i];
-            pathArray[i] = currentAgent.getAgentPathUntilStep(drawStep);
+            pathArray[i] = currentAgent.getFinalAgentPathUntilStep(drawStep);
         }
 
         return pathArray;
@@ -307,8 +361,10 @@ public class FARPathfinder implements Pathfinder {
         return numFailures;
     }
 
-    public int getPriority(int step, Element firstElement, Element secondElement) { // lower is better
-        if (firstElement.isEqual(secondElement)) return 4;
+    // this roates the priority directions according to simStep
+    // lower number is better
+    public int getPriority(int step, Element firstElement, Element secondElement) {
+        if (firstElement.isEqual(secondElement)) return 4; // waiting
 
         int incrementor = step % 4;
 
@@ -335,7 +391,7 @@ public class FARPathfinder implements Pathfinder {
         else resStep = previousReservation.getStep() + 1;
 
         if (reservationType == ReservationType.NORMAL || reservationType == ReservationType.PROXY) { // THIS SHOULD TAKE INTO ACCOUNT THE HEAD-ON COLLISIONS!
-            Element reservationElement = (Element) previousReservation.getReservationPath().getNodeData(resStep);
+            Element reservationElement = (Element) previousReservation.getElement();
 
             if (reservationType == ReservationType.NORMAL) System.out.println("\t\t\tReserving a normal reservation at element: "+reservationElement+" (step "+resStep+")");
             else System.out.println("\t\t\tReserving a proxy reservation at element: "+reservationElement+" (step "+resStep+")");
@@ -579,7 +635,7 @@ public class FARPathfinder implements Pathfinder {
     }
 
     private void reserveProxyForAgent(Element reservationElement, FARAgent agent, Reservation previousReservation) {
-        reservationElement.getFARExtension().setIsProxy(true);
+        //reservationElement.getFARExtension().setIsProxy(true);
 
         int resStep;
         if (previousReservation == null) resStep = 0; // should not happen
@@ -614,7 +670,7 @@ public class FARPathfinder implements Pathfinder {
     }
 
     private void reserveElementForAgent(Element reservationElement, FARAgent agent, ReservationType reservationType, Reservation previousReservation) {
-        if (reservationType == ReservationType.WAIT) reservationElement.getFARExtension().setIsWait(true);
+        //if (reservationType == ReservationType.WAIT) reservationElement.getFARExtension().setIsWait(true);
 
         int resStep;
         if (reservationType == ReservationType.INITIAL && previousReservation == null) resStep = 0;

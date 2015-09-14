@@ -6,12 +6,41 @@
             <line>51</line>
         </file>
         <file>
+            <url>src/farpackage/FARPathfinder.java</url>
+            <line>378</line>
+        </file>
+        <file>
             <url>src/eepackage/Field.java</url>
             <line>49</line>
         </file>
+    </editor-bookmarks>
+    <editor-bookmarks xmlns="http://www.netbeans.org/ns/editor-bookmarks/2" lastBookmarkId="0">
         <file>
             <url>src/farpackage/FARPathfinder.java</url>
-            <line>331</line>
+            <bookmark id="0">
+                <name/>
+                <line>374</line>
+                <key/>
+            </bookmark>
+        </file>
+        <file>
+            <url>src/eepackage/Field.java</url>
+            <bookmark id="0">
+                <name/>
+                <line>49</line>
+                <key/>
+            </bookmark>
+        </file>
+        <file>
+            <url>src/guipackage/Field.java</url>
+            <bookmark id="0">
+                <name/>
+                <line>51</line>
+                <key/>
+            </bookmark>
         </file>
     </editor-bookmarks>
+    <open-files xmlns="http://www.netbeans.org/ns/projectui-open-files/2">
+        <group/>
+    </open-files>
 </project-private>

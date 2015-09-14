@@ -16,9 +16,9 @@ public class FARExtension {
     private Element extraHorizontalAccessTo = null; // priority = 2
     private Element extraVerticalAccessTo = null; // priority = 1
 
-    private boolean isWait = false;
-    private boolean isProxy = false;
-    private boolean isFailure = false;
+    //private boolean isWait = false;
+    //private boolean isProxy = false;
+    //private boolean isFailure = false;
 
     private Reservation [] reservations;
     private Reservation [] ghostReservations;
@@ -68,7 +68,7 @@ public class FARExtension {
         extraVerticalAccessTo = element;
     }
 
-    public void setIsWait(boolean isWait) {
+    /*public void setIsWait(boolean isWait) {
         this.isWait = isWait;
     }
     public boolean isWait() {
@@ -85,7 +85,7 @@ public class FARExtension {
     }
     public boolean isFailure() {
         return isFailure;
-    }
+    }*/
 
     public List getAccessibleElements() {
         List returnList = new List();

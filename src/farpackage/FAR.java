@@ -22,14 +22,14 @@ public class FAR {
     }
 
     public List far(Element start, Element goal, Field field) {
-        HashSet closedSet = new HashSet((field.X_DIMENSION - 2) * (field.Y_DIMENSION - 2));  // The set of nodes already evaluated.
-                                        // ORDERED BY ELEMENT KEYS
-        MinimalQueue openSet = new MinimalQueue();    // The set of tentative nodes to be evaluated, initially containing the start node
-                                        // ORDERED BY F_SCORES
+        HashSet closedSet = new HashSet((field.X_DIMENSION - 2) * (field.Y_DIMENSION - 2)); // The set of nodes already evaluated.
+        // ORDERED BY ELEMENT KEYS
+        MinimalQueue openSet = new MinimalQueue(); // The set of tentative nodes to be evaluated, initially containing the start node
+        // ORDERED BY F_SCORES
 
-        double gScore = 0;                                  // Cost from start along best known path.
-        double hScore = field.manhattanDistanceBetween(start, goal); // distanceBetween == heuristic_cost_estimate
-        double fScore = gScore + hScore;                    // Estimated total cost from start to goal through y.
+        double gScore = 0; // Cost from start along best known path.
+        double hScore = field.manhattanDistanceBetween(start, goal); // manhattanDistanceBetween == right-angle heuristic cost estimate
+        double fScore = gScore + hScore; // Estimated total cost from start to goal through y.
 
         start.getAExtension().setScores(gScore, hScore, fScore);
 

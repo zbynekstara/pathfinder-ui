@@ -13,8 +13,8 @@ import generalpackage.*;
 import adtpackage.*;
 
 public class GraphicsPanel extends JPanel {
-    private GraphicsConstants gc = new GraphicsConstants();
-    private GraphicsUtil gu = new GraphicsUtil();
+    private final GraphicsConstants gc = new GraphicsConstants();
+    private final GraphicsUtil gu = new GraphicsUtil();
 
     private int dimension;
     private int numElements; // remember that these INCLUDE boundaries
@@ -228,7 +228,7 @@ public class GraphicsPanel extends JPanel {
     }
 
     private void paintMarkedElements(Graphics2D g2, Field f, Pathfinder pf) {
-        for (int x = 0; x < numElements; x++) {
+        /*for (int x = 0; x < numElements; x++) {
             for (int y = 0; y < numElements; y++) {
                 Point2D.Float ec = gu.getElementCorner(x, y);
 
@@ -252,20 +252,21 @@ public class GraphicsPanel extends JPanel {
                     }
                 }
             }
-        }
+        }*/
     }
 
     private void paintPaths(Graphics2D g2, Field f, Pathfinder pf, int step) {
         List [] agentPathsList = pf.getAgentPathsUntilStep(step);
-        for (int i = 0; i < agentPathsList.length; i++) {
-            List currentPath = agentPathsList[i];
+        for (List currentPath : agentPathsList) {
             for (int j = 0; j < currentPath.size()-1; j++) {
                 Element firstElement = (Element) currentPath.getNodeData(j);
                 Element secondElement = (Element) currentPath.getNodeData(j+1);
-
+                
                 Point2D.Float firstCenter = gu.getElementCenter(firstElement.X_ID, firstElement.Y_ID);
                 Point2D.Float secondCenter = gu.getElementCenter(secondElement.X_ID, secondElement.Y_ID);
-
+                // throws NullPointerException if the elements provided are null
+                // that happens when the final agent path is not initialized
+                
                 g2.setColor(gu.gradient(Color.GREEN, Color.RED, pf.FAILURE_CRITERION, j));
                 g2.draw(new Line2D.Float(firstCenter, secondCenter));
             }
