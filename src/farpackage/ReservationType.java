@@ -14,10 +14,11 @@ public enum ReservationType {
     NORMAL(1),
     WAIT(2),
     PROXY(3),
-    GHOST_NORTH(11), // ghost to the north of originating agent
+    GHOST(4);//,
+    /*GHOST_NORTH(11), // ghost to the north of originating agent
     GHOST_EAST(12), // ghost to the east of originating agent
     GHOST_SOUTH(13), // ghost to the south of originating agent
-    GHOST_WEST(14); // ghost to the west of originating agent
+    GHOST_WEST(14); // ghost to the west of originating agent*/
 
     private int value;
 

@@ -31,6 +31,8 @@ public class FARAgent implements Printable {
     // contains elements directly
     // updated with each step of simulation
 
+    private int agentPathSize = 0;
+    
     //private int reservationOffset = 0; // when changing reservations, how much should be subtracted
 
     private int agentGroup;
@@ -66,6 +68,7 @@ public class FARAgent implements Printable {
 
             currentElementList.insertAtRear(currentElement);
             agentPath.insertAtRear(currentElementList);
+            agentPathSize += 1;
         }
     }
 
@@ -210,6 +213,7 @@ public class FARAgent implements Printable {
 
         splitPathSegment(step); // if there is a path segment there, split it
         agentPath.insertAsNode(segment, step); // then insert the segment into the place
+        agentPathSize += 1;
     }
     public void insertPathElement(int step, Element element) {
         // add an element to a step to be part of the segment there
@@ -225,6 +229,7 @@ public class FARAgent implements Printable {
             if (step == 0) {
                 // special case
                 currentPathSegment.insertAtFront(element);
+                agentPathSize += 1;
             }
 
             int elementInSegmentIndex = 0;
@@ -240,11 +245,16 @@ public class FARAgent implements Printable {
 
             if (elementIndex == step-1) {
                 currentPathSegment.insertAsNode(element, step);
+                agentPathSize += 1;
             }
             else {
                 segmentIndex += 1;
             }
         }
+    }
+    
+    public int getAgentPathSize() {
+        return agentPathSize;
     }
 
     public void enqueueFinalPathElement(Element element) {

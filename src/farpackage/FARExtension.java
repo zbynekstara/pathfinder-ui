@@ -8,8 +8,8 @@ import adtpackage.*;
  * @author Zbyněk Stara
  */
 public class FARExtension {
-    private Field field;
-    private Element thisElement;
+    private final Field field;
+    private final Element thisElement;
 
     private Element verticalAccessTo = null; // priority = 3
     private Element horizontalAccessTo = null; // priority = 4
@@ -22,7 +22,8 @@ public class FARExtension {
 
     private Reservation [] reservations;
     private Reservation [] ghostReservations;
-
+    // as deep as FAULURE_CRITERION
+        
     public FARExtension(FARPathfinder pathfinder, Field field, Element thisElement) {
         this.field = field;
 
@@ -30,13 +31,13 @@ public class FARExtension {
 
         //reservationDepth = farPathfinder.RESERVATION_DEPTH;
 
-        reservations = new Reservation[pathfinder.FAILURE_CRITERION];
-        for (int i = 0; i < pathfinder.FAILURE_CRITERION; i++) {
+        reservations = new Reservation[FARPathfinder.FAILURE_CRITERION];
+        for (int i = 0; i < FARPathfinder.FAILURE_CRITERION; i++) {
             reservations[i] = null;
         }
 
-        ghostReservations = new Reservation[pathfinder.FAILURE_CRITERION];
-        for (int i = 0; i < pathfinder.FAILURE_CRITERION; i++) {
+        ghostReservations = new Reservation[FARPathfinder.FAILURE_CRITERION];
+        for (int i = 0; i < FARPathfinder.FAILURE_CRITERION; i++) {
             ghostReservations[i] = null;
         }
     }
@@ -88,41 +89,61 @@ public class FARExtension {
     }*/
 
     public List getAccessibleElements() {
-        List returnList = new List();
+        List accessibleList = new List();
 
-        if (verticalAccessTo != null) returnList.insertAtFront(verticalAccessTo);
-        if (horizontalAccessTo != null) returnList.insertAtFront(horizontalAccessTo);
-        if (extraHorizontalAccessTo != null) returnList.insertAtFront(extraHorizontalAccessTo);
-        if (extraVerticalAccessTo != null) returnList.insertAtFront(extraVerticalAccessTo);
+        if (verticalAccessTo != null) accessibleList.insertAtFront(verticalAccessTo);
+        if (horizontalAccessTo != null) accessibleList.insertAtFront(horizontalAccessTo);
+        if (extraHorizontalAccessTo != null) accessibleList.insertAtFront(extraHorizontalAccessTo);
+        if (extraVerticalAccessTo != null) accessibleList.insertAtFront(extraVerticalAccessTo);
 
-        return returnList;
+        return accessibleList;
     }
 
-    public List getUnreservedElements(int step) { // this now takes head-on collisions into account
-        List returnList = new List();
+    public List getUnreservedElements(int step) {
+        List unreservedList = new List();
         List accessibleList = getAccessibleElements();
 
         for (int i = 0; i < accessibleList.size(); i++) {
-            Element currentElement = (Element) accessibleList.getNodeData(i);
-            if (currentElement.getFARExtension().getReservation(step) == null) {
-                if (getGhostReservation(step) == null) returnList.insertAtFront(currentElement);
-                else if (getGhostReservation(step).getOriginalReservation().getElement() != currentElement) returnList.insertAtFront(currentElement);
+            Element currentAccessible = (Element) accessibleList.getNodeData(i);
+            // for each accessible element
+            
+            if (currentAccessible.getFARExtension().getReservation(step) == null) {
+                // if there is no reservation at the element yet
+                
+                if (getGhostReservation(step) == null) {
+                    // if there is no ghost reservation either at the element
+                    unreservedList.insertAtFront(currentAccessible);
+                    // the accessible element can be used as proxy start!
+                }
+                else if (getGhostReservation(step).getOriginalReservation().getElement() != thisElement) {
+                    // if there is a ghost reservation at the element
+                    unreservedList.insertAtFront(currentAccessible);
+                    // the accessible element can be used as proxy start
+                    // as long as the original element of the ghost is not this element!
+                    // prevents head-on collisions
+                }
             }
         }
 
-        return returnList;
+        return unreservedList;
     }
 
     public boolean isProxyAvailable(int step) {
+        // looks at the step layer around (but not including) an element
+        // if there is a place to go that is not reserved yet, returns true
+        // should be used when moving from [element,step-1] to [proxy?,step]
+        
         if (getUnreservedElements(step).isEmpty()) return false;
         else return true;
     }
 
     public List getProxyPath(int step) {
+        // returns a new path, starting from first available proxy spot, and ending at this element
         if (isProxyAvailable(step)) {
             FAR farAlgorithm = new FAR();
 
-            Element proxyStart = (Element) getUnreservedElements(step).getNodeData(0); // PROBLEM WITH HEAD-ON COLLISIONS
+            Element proxyStart = (Element) getUnreservedElements(step).getNodeData(0);
+            // PROBLEM WITH HEAD-ON COLLISIONS - should be solved by the ghost reservation condition in getUnreservedElements
             Element proxyEnd = thisElement;
 
             System.out.println("\t\t\t\t\tFinding proxy path with start at "+proxyStart+" and end at "+proxyEnd);
