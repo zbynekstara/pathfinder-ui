@@ -156,9 +156,10 @@ public class FARPathfinder implements Pathfinder {
 
         // coordination stage
         System.out.println("Coordination stage");
-        for (simStep = 0; simStep < FAILURE_CRITERION; simStep++) {
+        for (simStep = 0; simStep <= FAILURE_CRITERION; simStep++) {
             // simStep 0 is the initial reservation step for all agents
             // simStep 1 is the first step for which real reservations are needed
+            // we end at the FAILURE_CRITERION step, not before
 
             // initialization
             aw.firePropertyChange("update", simStep-1, simStep);
@@ -222,7 +223,7 @@ public class FARPathfinder implements Pathfinder {
                 System.out.println("\t\tCurrent agent: "+currentAgent.FARAGENT_ID+" (G: "+currentAgent.getAgentGroup()+", RI: "+reservationIndex+")");
 
                 // making the actual reservations
-                if ((currentAgent.getLastReservation() == null) || (simStep <= currentAgent.getAgentGroup() && currentAgent.getLastReservation().isInitialReservation())) {
+                if ((currentAgent.getLastReservation() == null) || (simStep < currentAgent.getAgentGroup() && currentAgent.getLastReservation().isInitialReservation())) {
                     // if this is the very first reservation
                     // or the simStep is lower than the agentGroup and previous reservation was initial = MAY LEAD TO PROBLEMS WHEN PROXY APPLIED AT VERY BEGINNING
 
@@ -242,9 +243,9 @@ public class FARPathfinder implements Pathfinder {
                         }
                     }
 
-                } else if (resStep < FAILURE_CRITERION) {
+                } else if (resStep <= FAILURE_CRITERION) {
                     // normal reservation
-                    // we have to end before currentStep reaches failure criterion
+                    // we have to end when currentStep reaches failure criterion
                     // we do not want to try to reserve at impossible times
 
                     if (resStep < currentAgent.getAgentPathSize()) {
@@ -825,19 +826,13 @@ public class FARPathfinder implements Pathfinder {
         Reservation newReservation = new Reservation(ReservationType.PROXY, proxyStart, agent, reservationIndex, currentStep, previousReservation); // CHECK IF THIS IS CORRECT
         //newReservation.setReservationPath(agentPath);
         
-        /*Reservation newGhostReservation = null;
-        if (previousReservation != null) {
-            newGhostReservation = new Reservation(ReservationType.GHOST, comingFrom, agent, reservationIndex, currentStep);
-            newGhostReservation.setOriginalReservation(newReservation);
-        }
-        newReservation.setGhostReservation(newGhostReservation);*/
-        
         Reservation newGhostReservation = new Reservation(ReservationType.GHOST, comingFrom, agent, reservationIndex, currentStep);
         newGhostReservation.setOriginalReservation(newReservation);
         newReservation.setGhostReservation(newGhostReservation);
 
         // adding reservation to element
         proxyStart.getFARExtension().setReservation(currentStep, newReservation);
+        comingFrom.getFARExtension().setGhostReservation(currentStep, newGhostReservation);
 
         // linking reservation
         previousReservation.setDependentReservation(newReservation);
@@ -891,13 +886,16 @@ public class FARPathfinder implements Pathfinder {
 
         Reservation newGhostReservation = null;
         if (previousReservation != null) {
-            newGhostReservation = new Reservation(ReservationType.GHOST, comingFrom, agent, reservationIndex, currentStep);
-            newGhostReservation.setOriginalReservation(newReservation);
+            if (elementToBeReserved != comingFrom) {
+                newGhostReservation = new Reservation(ReservationType.GHOST, comingFrom, agent, reservationIndex, currentStep);
+                newGhostReservation.setOriginalReservation(newReservation);
+            }
         }
         newReservation.setGhostReservation(newGhostReservation);
 
         // adding reservation to element
         elementToBeReserved.getFARExtension().setReservation(currentStep, newReservation);
+        comingFrom.getFARExtension().setGhostReservation(currentStep, newGhostReservation);
 
         // linking reservation
         if (previousReservation != null) previousReservation.setDependentReservation(newReservation);
@@ -1059,6 +1057,6 @@ public class FARPathfinder implements Pathfinder {
     }
 
     @Override public String toString() {
-        return ("Pathfinder at step " + simStep + ": Number of AAgents: " + farAgents.length);
+        return ("Pathfinder at step " + simStep + ": Number of FARAgents: " + farAgents.length);
     }
 }

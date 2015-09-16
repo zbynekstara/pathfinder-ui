@@ -23,14 +23,16 @@ public class FARAgent implements Printable {
     // the initial FAR path
     // contains elements directly
     private List agentPath = new List();
-    // list that contains lists of elements and paths as they look right now
-    // contains lists of elements
-    // updated with each reservation and especially with proxy paths
+    // list of paths as they look right now
+    // also contains elements directly
+    //// list that contains lists of elements and paths as they look right now
+    //// contains lists of elements
+    //// updated with each reservation and especially with proxy paths
     private List finalAgentPath = new List();
     // the final, coordinated FAR path, built by the algorithm
     // contains elements directly
     // updated with each step of simulation
-
+    
     private int agentPathSize = 0;
     
     //private int reservationOffset = 0; // when changing reservations, how much should be subtracted
@@ -57,8 +59,8 @@ public class FARAgent implements Printable {
         farAlgorithm.resetAExtensions(field);
 
         initialAgentPath = farAlgorithm.far(start, goal, field);
-        
-        // making a copy of initial agent path to be the agent path
+                
+        /*// making a copy of initial agent path to be the agent path
         // wrapping each element in a separate list
         Element currentElement;
         List currentElementList;
@@ -69,6 +71,12 @@ public class FARAgent implements Printable {
             currentElementList.insertAtRear(currentElement);
             agentPath.insertAtRear(currentElementList);
             agentPathSize += 1;
+        }*/
+        
+        Element currentElement;
+        for (int i = 0; i < initialAgentPath.size(); i++) {
+            currentElement = (Element) initialAgentPath.getNodeData(i);
+            agentPath.insertAtRear(currentElement);
         }
     }
 
@@ -121,7 +129,8 @@ public class FARAgent implements Printable {
         return returnPath;
     }*/
 
-    public Element getPathElement(int step) {
+    // FOR SIMPLICITY, ALL THIS FUNCTIONALITY IS SKIPPED N FAVOR OF SIMPLE LIST
+    /*public Element getPathElement(int step) {
         int segmentIndex = 0;
         int elementIndex = 0;
 
@@ -226,12 +235,6 @@ public class FARAgent implements Printable {
         while (true) {
             currentPathSegment = (List) agentPath.getNodeData(segmentIndex);
 
-            if (step == 0) {
-                // special case
-                currentPathSegment.insertAtFront(element);
-                agentPathSize += 1;
-            }
-
             int elementInSegmentIndex = 0;
             while (elementInSegmentIndex < currentPathSegment.size()) {
                 if (elementIndex == step-1) {
@@ -243,7 +246,7 @@ public class FARAgent implements Printable {
                 }
             }
 
-            if (elementIndex == step-1) {
+            if (elementIndex == step-1 || elementIndex == 0) {
                 currentPathSegment.insertAsNode(element, step);
                 agentPathSize += 1;
             }
@@ -251,10 +254,27 @@ public class FARAgent implements Printable {
                 segmentIndex += 1;
             }
         }
+    }*/
+    
+    public void insertPathElement(int step, Element element) {
+        agentPath.insertAsNode(element, step);
+    }
+    
+    public void insertPathSegment(int step, List pathSegment) {
+        Element currentElement;
+        for (int i = 0; i < pathSegment.size(); i++) {
+            currentElement = (Element) pathSegment.getNodeData(i);
+            agentPath.insertAsNode(currentElement, i+step);
+        }
+    }
+    
+    public Element getPathElement(int step) {
+        return (Element) agentPath.getNodeData(step);
     }
     
     public int getAgentPathSize() {
-        return agentPathSize;
+        //return agentPathSize;
+        return agentPath.size();
     }
 
     public void enqueueFinalPathElement(Element element) {

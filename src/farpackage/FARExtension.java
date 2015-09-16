@@ -22,7 +22,7 @@ public class FARExtension {
 
     private Reservation [] reservations;
     private Reservation [] ghostReservations;
-    // as deep as FAULURE_CRITERION
+    // FAULURE_CRITERION+1 deep = because we end at the number and start with 0
         
     public FARExtension(FARPathfinder pathfinder, Field field, Element thisElement) {
         this.field = field;
@@ -31,13 +31,13 @@ public class FARExtension {
 
         //reservationDepth = farPathfinder.RESERVATION_DEPTH;
 
-        reservations = new Reservation[FARPathfinder.FAILURE_CRITERION];
-        for (int i = 0; i < FARPathfinder.FAILURE_CRITERION; i++) {
+        reservations = new Reservation[FARPathfinder.FAILURE_CRITERION+1];
+        for (int i = 0; i <= FARPathfinder.FAILURE_CRITERION; i++) {
             reservations[i] = null;
         }
 
-        ghostReservations = new Reservation[FARPathfinder.FAILURE_CRITERION];
-        for (int i = 0; i < FARPathfinder.FAILURE_CRITERION; i++) {
+        ghostReservations = new Reservation[FARPathfinder.FAILURE_CRITERION+1];
+        for (int i = 0; i <= FARPathfinder.FAILURE_CRITERION; i++) {
             ghostReservations[i] = null;
         }
     }

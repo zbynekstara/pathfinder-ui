@@ -154,6 +154,7 @@ public class List implements Printable {
     }
 
     private <T extends Printable> String printNode(int node) {
-        return ((T) getNodeData(node)).print();
+        if (getNodeData(node) == null) return null;
+        else return ((T) getNodeData(node)).print();
     }
 }
