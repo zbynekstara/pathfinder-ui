@@ -14,12 +14,22 @@
             <line>49</line>
         </file>
     </editor-bookmarks>
-    <editor-bookmarks xmlns="http://www.netbeans.org/ns/editor-bookmarks/2" lastBookmarkId="0">
+    <editor-bookmarks xmlns="http://www.netbeans.org/ns/editor-bookmarks/2" lastBookmarkId="6">
         <file>
             <url>src/farpackage/FARPathfinder.java</url>
-            <bookmark id="0">
+            <bookmark id="6">
                 <name/>
-                <line>374</line>
+                <line>385</line>
+                <key/>
+            </bookmark>
+            <bookmark id="5">
+                <name/>
+                <line>757</line>
+                <key/>
+            </bookmark>
+            <bookmark id="4">
+                <name/>
+                <line>1023</line>
                 <key/>
             </bookmark>
         </file>
@@ -46,7 +56,6 @@
             <file>file:/Users/Zbynda/Code/github/pathfinder-ui/src/farpackage/FARExtension.java</file>
             <file>file:/Users/Zbynda/Code/github/pathfinder-ui/src/farpackage/FARPathfinder.java</file>
             <file>file:/Users/Zbynda/Code/github/pathfinder-ui/src/farpackage/Reservation.java</file>
-            <file>file:/Users/Zbynda/Code/github/pathfinder-ui/src/farpackage/ReservationType.java</file>
         </group>
     </open-files>
 </project-private>

@@ -524,7 +524,7 @@ public class GraphicsGUI extends GUI {
     }//GEN-LAST:event_zeroButtonMouseReleased
 
     private void plusButtonMouseReleased(java.awt.event.MouseEvent evt) {//GEN-FIRST:event_plusButtonMouseReleased
-        if (isFieldSet && areAgentsSet && arePathsSet && stepCounter < (choosePathfinder().FAILURE_CRITERION - 1)) {
+        if (isFieldSet && areAgentsSet && arePathsSet && stepCounter < (choosePathfinder().FAILURE_CRITERION)) {
             stepCounter++;
             stepTF.setText(stepCounter + "");
 

@@ -19,33 +19,42 @@ public class FARAgent implements Printable {
     public final Element START;
     public final Element GOAL;
 
+    private int agentGroup;
+    
     private List initialAgentPath = new List();
     // the initial FAR path
-    // contains elements directly
-    private List agentPath = new List();
-    // list of paths as they look right now
-    // also contains elements directly
-    //// list that contains lists of elements and paths as they look right now
-    //// contains lists of elements
-    //// updated with each reservation and especially with proxy paths
+    
+    private List futureAgentPath = new List();
+    // path segment that would be the result of future reservations
+    
     private List finalAgentPath = new List();
-    // the final, coordinated FAR path, built by the algorithm
-    // contains elements directly
+    // the final, coordinated path, built by the algorithm
     // updated with each step of simulation
     
-    private int agentPathSize = 0;
+    private int honoredInitialPathMovement;
+    // how far along the initial path are we
+    // 0 means we have not started (honoredReservations is empty)
+    // 0 means we are at the start place
+    // 1 means we have moved at least once
     
-    //private int reservationOffset = 0; // when changing reservations, how much should be subtracted
+    private int futureInitialPathMovement;
+    // how much farther along the initial path we would be if future reservations were fulfilled
+    
+    private List honoredReservations = new List();
+    // reservations that were completed and the agent moved to their elements
+    
+    private List futureReservations = new List();
+    // reservations that are currently planned for the agent but may still be removed
+    
+    //private Reservation firstReservation = null; // first of honored OR if none there, first of future
+    //private Reservation lastHonoredReservation = null; // last of honored reservations
+    //private Reservation lastReservation = null; // last of future reservations
 
-    private int agentGroup;
+    private boolean isComplete;
+    private boolean isFailure;
 
-    private Reservation firstReservation = null;
-    private Reservation lastHonoredReservation = null;
-    private Reservation lastReservation = null;
-
-    private boolean isComplete = false;
-    private boolean isFailure = false;
-
+    // first non-initial reservation is a normal reservation of the starting position
+    
     public FARAgent(Field field, FARPathfinder pathfinder, Element start, Element goal, int id) {
         this.field = field;
 
@@ -59,231 +68,143 @@ public class FARAgent implements Printable {
         farAlgorithm.resetAExtensions(field);
 
         initialAgentPath = farAlgorithm.far(start, goal, field);
-                
-        /*// making a copy of initial agent path to be the agent path
-        // wrapping each element in a separate list
-        Element currentElement;
-        List currentElementList;
-        for (int i = 0; i < initialAgentPath.size(); i++) {
-            currentElement = (Element) agentPath.getNodeData(i);
-            currentElementList = new List();
-
-            currentElementList.insertAtRear(currentElement);
-            agentPath.insertAtRear(currentElementList);
-            agentPathSize += 1;
-        }*/
         
-        Element currentElement;
-        for (int i = 0; i < initialAgentPath.size(); i++) {
-            currentElement = (Element) initialAgentPath.getNodeData(i);
-            agentPath.insertAtRear(currentElement);
-        }
+        honoredInitialPathMovement = 0;
+        futureInitialPathMovement = 0;
+        
+        isComplete = false;
+        isFailure = false;
     }
-
-    /*public void setReservationOffset(int reservationOffset) {
-        this.reservationOffset = reservationOffset;
-    }
-    public int getReservationOffset() {
-        return reservationOffset;
-    }*/
 
     public void setAgentGroup(int agentGroup) {
         this.agentGroup = agentGroup;
     }
+    
     public int getAgentGroup() {
         return agentGroup;
     }
 
-    public void setFirstReservation(Reservation firstReservation) {
-        this.firstReservation = firstReservation;
+    public void enqueueFutureReservation(Reservation futureReservation) {
+        futureReservations.insertAtRear(futureReservation);
+        futureAgentPath.insertAtRear(futureReservation.getElement());
+        if (futureReservation.isNormalReservation()) futureInitialPathMovement += 1;
     }
-    public Reservation getFirstReservation() {
-        return firstReservation;
-    }
-
-    public void setLastHonoredReservation(Reservation lastHonoredReservation) {
-        this.lastHonoredReservation = lastHonoredReservation;
-    }
-    public Reservation getLastHonoredReservation() {
-        return lastHonoredReservation;
-    }
-
-    public void setLastReservation(Reservation lastReservation) {
-        this.lastReservation = lastReservation;
-    }
-    public Reservation getLastReservation() {
-        return lastReservation;
-    }
-
-    // SHOULD BE REPLACED BY METHODS BELOW
-    /*public void setAgentPath(List agentPath) {
-        this.agentPath = agentPath;
-    }
-    public List getAgentPath() { // RETURNING A COPY, NOT THE PATH ITSELF
-        List returnPath = new List();
-
-        for (int i = 0; i < agentPath.size(); i++) {
-            returnPath.insertAtRear((Element) agentPath.getNodeData(i));
-        }
-
-        return returnPath;
-    }*/
-
-    // FOR SIMPLICITY, ALL THIS FUNCTIONALITY IS SKIPPED N FAVOR OF SIMPLE LIST
-    /*public Element getPathElement(int step) {
-        int segmentIndex = 0;
-        int elementIndex = 0;
-
-        List currentPathSegment;
-        Element currentElement = null;
-
-        while (true) {
-            currentPathSegment = (List) agentPath.getNodeData(segmentIndex);
-
-            int elementInSegmentIndex = 0;
-            while (elementInSegmentIndex < currentPathSegment.size()) {
-                if (elementIndex == step) {
-                    currentElement = (Element) currentPathSegment.getNodeData(elementInSegmentIndex);
-                    break;
-                }
-                else {
-                    elementIndex += 1;
-                    elementInSegmentIndex += 1;
-                }
+    
+    public Reservation removeFutureReservations(int step) {
+        Reservation firstRemovedReservation = null;
+        
+        if (step >= honoredReservations.size()) {
+            int futureReservationsIndex = step - honoredReservations.size();
+            int counter = 0;
+            while (futureReservationsIndex < futureReservations.size()) {                
+                Reservation reservationToRemove = (Reservation) futureReservations.removeNode(futureReservationsIndex);
+                pathfinder.printToScreen("Removing reservation: "+reservationToRemove);
+                if (counter == 0) firstRemovedReservation = reservationToRemove;
+                
+                futureAgentPath.removeNode(futureReservationsIndex);
+                if (reservationToRemove.isNormalReservation()) futureInitialPathMovement -= 1;
+                
+                // not necessary to increase futureReservationsIndex because size decreases with removals
+                counter += 1;
             }
-
-            if (elementIndex == step) break;
-            else segmentIndex += 1;
         }
         
-        return currentElement;
-    }
-    public void splitPathSegment(int step) {
-        // if there is not a boundary of path segments before step, split segment
-        int segmentIndex = 0;
-        int elementIndex = 0;
-
-        List currentPathSegment;
-
-        while (true) {
-            currentPathSegment = (List) agentPath.getNodeData(segmentIndex);
-
-            int elementInSegmentIndex = 0;
-            while (elementInSegmentIndex < currentPathSegment.size()) {
-                if (elementIndex == step) {
-                    break;
-                }
-                else {
-                    elementIndex += 1;
-                    elementInSegmentIndex += 1;
-                }
-            }
-
-            if (elementIndex == step) {
-                // the correct segment has been found
-
-                if (elementInSegmentIndex == 0) {
-                    // the requested element is already frst in its segment
-                    // nothing needs to be done
-                    return;
-                }
-
-                Element insertElement;
-                List firstNewSegment = new List();
-                List secondNewSegment = new List();
-                int mid = 0;
-
-                while (mid < elementInSegmentIndex) {
-                    // add everything in the segment before the element into firstNewSegment
-                    insertElement = (Element) currentPathSegment.getNodeData(mid);
-                    firstNewSegment.insertAtRear(insertElement);
-                    mid += 1;
-                }
-
-                while (mid < currentPathSegment.size()) {
-                    // add everything in the segment after and including the element into secondNewSegment
-                    insertElement = (Element) currentPathSegment.getNodeData(mid);
-                    secondNewSegment.insertAtRear(insertElement);
-                    mid += 1;
-                }
-
-                agentPath.removeNode(segmentIndex);
-                agentPath.insertAsNode(firstNewSegment, segmentIndex);
-                agentPath.insertAsNode(secondNewSegment, segmentIndex+1);
-            }
-
-            else {
-                segmentIndex += 1;
-            }
-        }
-    }
-    public void insertPathSegment(int step, List segment) {
-        // adds a path segment to be the segment at step, moving all others down
-
-        splitPathSegment(step); // if there is a path segment there, split it
-        agentPath.insertAsNode(segment, step); // then insert the segment into the place
-        agentPathSize += 1;
-    }
-    public void insertPathElement(int step, Element element) {
-        // add an element to a step to be part of the segment there
-
-        int segmentIndex = 0;
-        int elementIndex = 0;
-
-        List currentPathSegment;
-
-        while (true) {
-            currentPathSegment = (List) agentPath.getNodeData(segmentIndex);
-
-            int elementInSegmentIndex = 0;
-            while (elementInSegmentIndex < currentPathSegment.size()) {
-                if (elementIndex == step-1) {
-                    break;
-                }
-                else {
-                    elementIndex += 1;
-                    elementInSegmentIndex += 1;
-                }
-            }
-
-            if (elementIndex == step-1 || elementIndex == 0) {
-                currentPathSegment.insertAsNode(element, step);
-                agentPathSize += 1;
-            }
-            else {
-                segmentIndex += 1;
-            }
-        }
-    }*/
-    
-    public void insertPathElement(int step, Element element) {
-        agentPath.insertAsNode(element, step);
+        return firstRemovedReservation;
     }
     
-    public void insertPathSegment(int step, List pathSegment) {
-        Element currentElement;
-        for (int i = 0; i < pathSegment.size(); i++) {
-            currentElement = (Element) pathSegment.getNodeData(i);
-            agentPath.insertAsNode(currentElement, i+step);
+    public Reservation honorFutureReservation() {
+        Reservation reservationToHonor = (Reservation) futureReservations.removeFirst();
+        futureAgentPath.removeFirst();
+        
+        honoredReservations.insertAtRear(reservationToHonor);
+        finalAgentPath.insertAtRear(reservationToHonor.getElement());
+        
+        // only modify honoredInitialPathMovement for normal reservations
+        if (reservationToHonor.isNormalReservation()) {
+            futureInitialPathMovement -= 1;            
+            honoredInitialPathMovement += 1;
         }
+        
+        return reservationToHonor;
+    }
+        
+    public Reservation getFirstReservation() {
+        if (!honoredReservations.isEmpty()) return (Reservation) honoredReservations.getNodeData(0);
+        else if (!futureReservations.isEmpty()) return (Reservation) futureReservations.getNodeData(0);
+        else return null;
+    }
+
+    public Reservation getLastHonoredReservation() {
+        if (!honoredReservations.isEmpty()) return (Reservation) honoredReservations.getLastNodeData();
+        else return null;
+    }
+
+    public Reservation getLastReservation() {
+        if (!futureReservations.isEmpty()) return (Reservation) futureReservations.getLastNodeData();
+        else if (!honoredReservations.isEmpty()) return (Reservation) honoredReservations.getLastNodeData();
+        else return null;
+    }
+    
+    public int getHonoredInitialPathMovement() {
+        return honoredInitialPathMovement;
+    }
+    
+    public int getFutureInitialPathMovement() {
+        return futureInitialPathMovement;
+    }
+    
+    public double getHonoredInitialPathCompletion() {
+        double honoredInitialPathCompletion = honoredInitialPathMovement / honoredReservations.size();
+        return honoredInitialPathCompletion;
+    }
+    
+    public double getFutureInitialPathCompletion() {
+        double futureInitialPathCompletion = futureInitialPathMovement / futureReservations.size();
+        return futureInitialPathCompletion;
     }
     
     public Element getPathElement(int step) {
-        return (Element) agentPath.getNodeData(step);
+        if (step < finalAgentPath.size()) {
+            // if step has already been commited to final path
+            int index = step;
+            return (Element) finalAgentPath.getNodeData(index);
+        }
+        else if (step < (finalAgentPath.size() + futureAgentPath.size())) {
+            // if step is not in final path but is in future path as it looks right now
+            int index = step - finalAgentPath.size();
+            return (Element) futureAgentPath.getNodeData(index);
+        }
+        else {
+            // if step is not in final or future path, it is in initial path
+            // use the initialPathMovement data to determine where we are right now along initial path
+            // e.g. if we want info for step 20, but we have honored up to 17 and future has additional 1 = 18
+            // we need to look what happens 20 - 18 = 2 steps after the future step
+            // but initialAgentPath only reflects movement during reservations
+            // if we moved by 6 in honored and 0 in future, we need to look at step 6 + 0 + 2 = 8 of initial path
+            int index = honoredInitialPathMovement + futureInitialPathMovement + (step - (finalAgentPath.size() + futureAgentPath.size()));
+            return (Element) initialAgentPath.getNodeData(index);
+        }
     }
     
-    public int getAgentPathSize() {
-        //return agentPathSize;
-        return agentPath.size();
+    public int getHonoredReservationListSize() {
+        int honoredPathSize = honoredReservations.size();
+        return honoredPathSize;
+    }
+    
+    public int getFutureReservationListSize() {
+        int futurePathSize = futureReservations.size();
+        return futurePathSize;
+    }
+    
+    public int getAgentReservationListSize() {
+        int agentPathSize = honoredReservations.size() + (initialAgentPath.size() - honoredInitialPathMovement);
+        return agentPathSize;
     }
 
-    public void enqueueFinalPathElement(Element element) {
-        // must be an element
-        finalAgentPath.insertAtRear(element);
-    }
     public Element getFinalPathElement(int step) {
         return (Element) finalAgentPath.getNodeData(step);
     }
+    
     public List getFinalAgentPathUntilStep(int step) {
         List path = new List();
 
@@ -301,6 +222,7 @@ public class FARAgent implements Printable {
     public void setIsComplete(boolean isComplete) {
         this.isComplete = isComplete;
     }
+    
     public boolean isComplete() {
         return isComplete;
     }

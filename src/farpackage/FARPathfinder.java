@@ -3,6 +3,7 @@ package farpackage;
 import generalpackage.*;
 import adtpackage.*;
 import guipackage.*;
+import java.util.concurrent.ExecutionException;
 
 /**
  *
@@ -33,7 +34,8 @@ public class FARPathfinder implements Pathfinder {
          * @author Zbyněk Stara
          */
         @Override
-        public Boolean doInBackground() throws Exception {
+        public Boolean doInBackground() throws InterruptedException, ExecutionException, RuntimeException {
+            System.out.println("<BACKGROUND ALLOCATION>");
             startTime = System.currentTimeMillis();
             findAgentPathsHandler();
             return true;
@@ -47,11 +49,24 @@ public class FARPathfinder implements Pathfinder {
          */
         @Override
         protected void done() {
+            System.out.println("<END BACKGROUND ALLOCATION>");
+            
             // the allocation info dialog will be reset and hidden
             gui.getInfoStepTF().setText("");
             gui.getInfoSuccessTF().setText("");
             gui.getInfoTimeTF().setText("");
             gui.getInfoDialog().setVisible(false);
+            
+            // error handling
+            try {
+                get();
+            } catch (InterruptedException e) {
+                e.getCause().printStackTrace();
+            } catch (ExecutionException e) {
+                e.getCause().printStackTrace();
+            } catch (RuntimeException e) {
+                e.getCause().printStackTrace();
+            }
         }
     }
 
@@ -63,7 +78,7 @@ public class FARPathfinder implements Pathfinder {
         aw.addPropertyChangeListener(new java.beans.PropertyChangeListener() {
             public void propertyChange(java.beans.PropertyChangeEvent evt) {
                 if ("update".equals(evt.getPropertyName())) {
-                    thisPathfinder.updateInfo(); // update simStep
+                    thisPathfinder.updateInfo(); // update simulationStep
                 }
             }
         });
@@ -93,12 +108,16 @@ public class FARPathfinder implements Pathfinder {
 
     private TreeSet [] farAgentGroups;
 
-    private int simStep = 0; // simulation step
+    private int simulationStep = 0;
 
-    private MinimalQueue agentReservationOrderAtStep = new MinimalQueue();
-
+    private IntegerList agentGroupOrder;
+    
+    private MinimalQueue agentReservationOrder;
+        
     private int numSuccesses = 0;
     private int numFailures = 0;
+    
+    private int printLevel = 0;
 
     public FARPathfinder(GUI gui, Field field) {
         // INITIALIZATION:
@@ -153,33 +172,43 @@ public class FARPathfinder implements Pathfinder {
             currentGroupNum += 1;
             if (currentGroupNum == RESERVATION_DEPTH) currentGroupNum = 0;
         }
+        
+        // setting the order of agent groups
+        agentGroupOrder = new IntegerList();
+        for (int i = 0; i < farAgentGroups.length; i++) {
+            agentGroupOrder.insertAtRear(i);
+        }
 
         // coordination stage
-        System.out.println("Coordination stage");
-        for (simStep = 0; simStep <= FAILURE_CRITERION; simStep++) {
-            // simStep 0 is the initial reservation step for all agents
-            // simStep 1 is the first step for which real reservations are needed
+        printToScreen("Coordination stage");
+        for (simulationStep = 0; simulationStep <= FAILURE_CRITERION; simulationStep++) {
+            // simulationStep 0 is the initial reservation step for all agents
+            // simulationStep 1 is the first step for which real reservations are needed
             // we end at the FAILURE_CRITERION step, not before
 
             // initialization
-            aw.firePropertyChange("update", simStep-1, simStep);
-            System.out.println("Step: "+simStep);
-
-            int agentGroupForStep = (simStep-1) % RESERVATION_DEPTH; // each step only sees coordination from a portion of agents
-
+            aw.firePropertyChange("update", simulationStep-1, simulationStep);
+            printToScreen("Step: "+simulationStep);
+            
+            incrementPrintLevel(); // 1
+            printToScreen("Agent group order: "+agentGroupOrder);
+            
             // randomization of agents
-            agentReservationOrderAtStep = new MinimalQueue(); // it is necessary to mix up the agent reservation order
+            agentReservationOrder = new MinimalQueue(); // it is necessary to mix up the agent reservation order
             MaximalQueue unassignedAgents = new MaximalQueue(); // queue of agents awaiting assignment to reservation order
-
-            if (simStep == 0) {
+            
+            if (simulationStep == 0) {
                 // if this is step 0, enqueue everyone for initial reservation order assignment
-                for (int i = simStep; i < farAgentGroups.length; i++) {
+                for (int i = simulationStep; i < farAgentGroups.length; i++) {
                     for (int j = 0; j < farAgentGroups[i].size(); j++) {
                         unassignedAgents.enqueue((FARAgent) farAgentGroups[i].getNodeData(j), ((FARAgent) farAgentGroups[i].getNodeData(j)).FARAGENT_ID);
                     }
                 }
-            } else if (simStep > 0) {
+            } else if (simulationStep > 0) {
                 // if this is not step 0, enqueue only agents from the appropriate agent group
+                int agentGroupForStep = agentGroupOrder.getLastNodeValue();
+                printToScreen("Agent group for step: "+agentGroupForStep);
+                
                 for (int i = 0; i < farAgentGroups[agentGroupForStep].size(); i++) {
                     unassignedAgents.enqueue((FARAgent) farAgentGroups[agentGroupForStep].getNodeData(i), ((FARAgent) farAgentGroups[agentGroupForStep].getNodeData(i)).FARAGENT_ID);
                 }
@@ -193,146 +222,128 @@ public class FARPathfinder implements Pathfinder {
                     chosenAgent = (FARAgent) unassignedAgents.remove(randomAgentKey); // get the agent
                 } while (chosenAgent == null); // the above procedure may fail
 
-                agentReservationOrderAtStep.enqueue(chosenAgent, simStep); // enqueue the chosen agent into reservation order
+                agentReservationOrder.enqueue(chosenAgent, simulationStep); // enqueue the chosen agent into reservation order
+                // this means that all keys of agent reservation order are 1 behind reservationStep!!
             }
 
             // reserving
             // during this part of the algrithm, some agents look ahead (up to RESERVATION_DEPTH steps) and reserve their required paths
-            // this is different from the next step of the algorithm, where all agents actually perform the reservation at the current simStep
-            while (!agentReservationOrderAtStep.isEmpty()) {
+            // this is different from the next step of the algorithm, where all agents actually perform the reservation at the current simulationStep
+            while (!agentReservationOrder.isEmpty()) {
                 // while there are agents to reserve for
-                FARAgent currentAgent = (FARAgent) agentReservationOrderAtStep.dequeue();
+                FARAgent currentAgent = (FARAgent) agentReservationOrder.dequeue();
 
                 Reservation previousReservation = currentAgent.getLastReservation();
 
                 // initializing
-                int resStep; // reservation step
-                // this is different from the simStep
-                // currentStep can be up to RESERVATION_DEPTH larger than simStep
-
-                if (previousReservation == null) resStep = 0;
-                else resStep = previousReservation.getStep() + 1;
-
-                int reservationIndex; // how many steps ahead should we plan
-
-                if (currentAgent.getLastReservation() == null) reservationIndex = (RESERVATION_DEPTH - currentAgent.getAgentGroup()) - 1;
-                // if this is the first time we reserve, reserve 1-RESERVATION_DEPTH steps
-                else reservationIndex = (previousReservation.getReservationIndex() + 1) % RESERVATION_DEPTH;
-                // if this is during normal reservations, reserve for the correct number of steps according to previous reservation
-
-                System.out.println("\t\tCurrent agent: "+currentAgent.FARAGENT_ID+" (G: "+currentAgent.getAgentGroup()+", RI: "+reservationIndex+")");
-
+                int reservationStep;
+                // this is different from the simulationStep
+                // reservationStep can be up to RESERVATION_DEPTH (not inclusive) larger than simulationStep
+                Element comingFrom;
+                
+                if (previousReservation == null) {
+                    reservationStep = 0;
+                    comingFrom = currentAgent.START;
+                }
+                else {
+                    reservationStep = previousReservation.getStep() + 1;
+                    comingFrom = previousReservation.getElement();
+                    // if this is during normal reservations, reserve for the correct number of steps according to previous reservation
+                }
+                
+                int reservationIndex = getReservationIndex(currentAgent, reservationStep); // how many more steps do we need to plan
+                
                 // making the actual reservations
-                if ((currentAgent.getLastReservation() == null) || (simStep < currentAgent.getAgentGroup() && currentAgent.getLastReservation().isInitialReservation())) {
+                if ((currentAgent.getLastReservation() == null) || (reservationStep <= currentAgent.getAgentGroup() && currentAgent.getLastReservation().isInitialReservation())) {
                     // if this is the very first reservation
-                    // or the simStep is lower than the agentGroup and previous reservation was initial = MAY LEAD TO PROBLEMS WHEN PROXY APPLIED AT VERY BEGINNING
+                    // or the simulationStep is lower than the agentGroup and previous reservation was initial = MAY LEAD TO PROBLEMS WHEN PROXY APPLIED AT VERY BEGINNING
 
-                    reserve(currentAgent, ReservationType.INITIAL, previousReservation);
-
-                    if (((RESERVATION_DEPTH - reservationIndex) - 1) > 0) { // THIS WAS !=
-                        // add the agent back to the reservation order to get another initial reservation as needed
-                        agentReservationOrderAtStep.enqueue(currentAgent, resStep);
-                    } else {
-                        // normally, this would do nothing
-                        // but reassignments make it possible for a proxy reservation to be made before some of the later initial reservations are made
-                        // that would increase the reservation index
-                        // thus, it may be required to delete this extra initial assignment
-                        while (agentReservationOrderAtStep.search(currentAgent) != -1) { // -1 means it was not found
-                            System.out.println("\t\tDeleting extra assignment of agent "+currentAgent.FARAGENT_ID);
-                            agentReservationOrderAtStep.delete(currentAgent);
-                        }
+                    if (currentAgent.getFutureReservationListSize() < (RESERVATION_DEPTH - reservationIndex)) {
+                        // reserve only if there is not already a future reservation at reservation step
+                        Element elementToBeReserved = comingFrom;
+                        reserveInitial(currentAgent, ReservationType.INITIAL, previousReservation, elementToBeReserved);
+                        
+                        // if there are still reservations to be made, put the agent back in reservation order
+                        if (reservationIndex > 0) agentReservationOrder.enqueue(currentAgent, reservationStep);
                     }
 
-                } else if (resStep <= FAILURE_CRITERION) {
+                } else if (reservationStep <= FAILURE_CRITERION) {
                     // normal reservation
                     // we have to end when currentStep reaches failure criterion
                     // we do not want to try to reserve at impossible times
 
-                    if (resStep < currentAgent.getAgentPathSize()) {
+                    if (reservationStep < currentAgent.getAgentReservationListSize()) {
                         // if currentStep is smaller than the size of the agent's reservation path
                         // we still have stuff to do
 
-                        reserve(currentAgent, ReservationType.NORMAL, previousReservation);
-
-                        if (((RESERVATION_DEPTH - reservationIndex) - 1) > 0) { // SHOULD THIS BE > ?
+                        if (currentAgent.getFutureReservationListSize() < (RESERVATION_DEPTH - reservationIndex)) {
+                            // reserve only if there is not already a future reservation at reservation step
+                            Element elementToBeReserved = currentAgent.getPathElement(reservationStep);
+                            reserveMovement(currentAgent, ReservationType.NORMAL, previousReservation, elementToBeReserved, null);
+                            
                             // if there are still reservations to be made, put the agent back in reservation order
-                            agentReservationOrderAtStep.enqueue(currentAgent, resStep);
-                        } else {
-                            // normally, this would do nothing
-                            // but it is possible for proxy assignments to be made before this happens
-                            // then the reservation index would be bigger
-                            // and thus the extra assignemnts would need to be scrapped
-                            while (agentReservationOrderAtStep.search(currentAgent) != -1) { // -1 means not found
-                                System.out.println("\t\tDeleting extra assignment of agent "+currentAgent.FARAGENT_ID);
-                                agentReservationOrderAtStep.delete(currentAgent);
-                            }
+                            if (reservationIndex > 0) agentReservationOrder.enqueue(currentAgent, reservationStep);
                         }
 
                     } else {
-                        // if this step is after the end of the reservation path
+                        // if this step is after the end of agent's path
                         // end by waiting at the finish point
 
-                        reserve(currentAgent, ReservationType.WAIT, previousReservation);
-
-                        if (((RESERVATION_DEPTH - reservationIndex) - 1) > 0) {
-                            // if there are still some resSteps for which to reserve
-                            // add the agent back to reservation order
-                            agentReservationOrderAtStep.enqueue(currentAgent, resStep);
-                        } else {
-                            while (agentReservationOrderAtStep.search(currentAgent) != -1) { // -1 means not found
-                                System.out.println("\t\tDeleting extra assignment of agent "+currentAgent.FARAGENT_ID);
-                                agentReservationOrderAtStep.delete(currentAgent);
-                            }
+                        if (currentAgent.getFutureReservationListSize() < (RESERVATION_DEPTH - reservationIndex)) {
+                            // reserve only if there is not already a future reservation at reservation step
+                            Element elementToBeReserved = comingFrom;
+                            reserveWait(currentAgent, ReservationType.WAIT, previousReservation, elementToBeReserved, null);
+                            
+                            // if there are still reservations to be made, put the agent back in reservation order
+                            if (reservationIndex > 0) agentReservationOrder.enqueue(currentAgent, reservationStep);
                         }
                     }
                 }
             }
 
             // Moving agents
-            System.out.println("\tMoving agents");
+            printToScreen("Moving agents");
+            incrementPrintLevel(); // 2
             for (FARAgent currentAgent : farAgents) {
-                // going through all agents
-
-                System.out.println("\t\tAdjusting path of agent "+currentAgent.FARAGENT_ID+"");
-
-                System.out.println("\t\t\tLast honored reservation: "+currentAgent.getLastHonoredReservation());
+                //printToScreen("Adjusting path of agent "+currentAgent.FARAGENT_ID+"");
                 
-                // perform the reservation that is lined up for this agent
-                Reservation reservationToHonor;
-                if (currentAgent.getLastHonoredReservation() == null) reservationToHonor = currentAgent.getFirstReservation(); // first reservation
-                else reservationToHonor = currentAgent.getLastHonoredReservation().getDependentReservation();
-                System.out.println("\t\t\tReservation to honor: "+reservationToHonor);
+                //incrementPrintLevel(); // 3
+                //printToScreen("Last honored reservation: "+currentAgent.getLastHonoredReservation());
                 
-                // modify agent path
-                //currentAgent.setAgentPath(reservationToHonor.getReservationPath());
+                // perform the reservation that is lined up for this agent                
+                Reservation reservationToHonor = currentAgent.honorFutureReservation();
+                //printToScreen("Reservation to honor: "+reservationToHonor);
+                //decrementPrintLevel(); // 2
                 
-                //currentAgent.splitPathSegment(simStep);
-                Element pathElement = currentAgent.getPathElement(simStep);
-                currentAgent.enqueueFinalPathElement(pathElement);
-                
-                currentAgent.setLastHonoredReservation(reservationToHonor);
-
-                // if this is the last element of the agent's path, finish
-                Element currentElement = currentAgent.getPathElement(simStep);
+                // if this is the last element of the agent's path, make it complete
+                Element currentElement = currentAgent.getFinalPathElement(simulationStep);
                 if (currentElement == currentAgent.GOAL && !currentAgent.isComplete()) {
-                    System.out.println("\t\tSuccess for agent: "+currentAgent.FARAGENT_ID);
+                    printToScreen("Success for agent: "+currentAgent.FARAGENT_ID);
                     numSuccesses += 1;
                     currentAgent.setIsComplete(true);
                 }
             }
+            decrementPrintLevel(); // 1
+            
+            // put the currently first agent group at the end of the agent group order
+            int firstAgentGroup = agentGroupOrder.removeFirst();
+            agentGroupOrder.insertAtRear(firstAgentGroup);
+            
+            decrementPrintLevel(); // 0
         }
 
-        // wrap up afer all simSteps are exhausted
-        System.out.println("After coordination stage");
+        // wrap up afer all simulationSteps are exhausted
+        printToScreen("After coordination stage");
+        incrementPrintLevel(); // 1
         for (FARAgent currentAgent : farAgents) {
             if (!currentAgent.isComplete()) {
-                //currentAgent.getPathElement(FAILURE_CRITERION - 1).getFARExtension().setIsFailure(true);
-                System.out.println("\tFailure for agent: "+currentAgent.FARAGENT_ID);
+                printToScreen("Failure for agent: "+currentAgent.FARAGENT_ID);
                 numFailures += 1;
             }
         }
+        decrementPrintLevel(); // 0
 
-        System.out.println("Number of failures: "+numFailures);
+        printToScreen("Number of failures: "+numFailures);
     }
 
     // draw method for gui
@@ -367,9 +378,66 @@ public class FARPathfinder implements Pathfinder {
         return numFailures;
     }
 
-    // this roates the priority directions according to simStep
+    // which one of the two agents has priority
+    // look at path completion first, then at direction
+    // negative result = firstAgent has priority
+    // zero = the two agents have the same priority
+    // positive result = secondAgent has priority
+    private int comparePriority(int step, Reservation firstAgentPreviousReservation, Reservation secondAgentObstructingReservation, Element elementToBeReserved) {
+        // try to settle this with path completion first
+        int comparePathCompletionPriority = comparePathCompletionPriority(firstAgentPreviousReservation.getAgent(), secondAgentObstructingReservation.getAgent());
+        if (comparePathCompletionPriority != 0) return comparePathCompletionPriority;
+        
+        // try to settle this with overriding second
+        int compareOverridingPriority = compareOverridingPriority(firstAgentPreviousReservation.getAgent(), secondAgentObstructingReservation);
+        if (compareOverridingPriority != 0) return compareOverridingPriority;
+        
+        // if no other way to settle this, use the rotating direction priority system
+        return compareDirectionPriority(step, firstAgentPreviousReservation.getElement(), elementToBeReserved, secondAgentObstructingReservation.getCameFrom(), secondAgentObstructingReservation.getElement());
+    }
+    
+    // which one of the two agents has priority based on initial path completion
+    // negative result = firstAgent completed more = has priority
+    // zero = the two agents completed the same percentage = have the same priority
+    // positive result = secondAgent completed more = has priority
+    private int comparePathCompletionPriority(FARAgent firstAgent, FARAgent secondAgent) {
+        double firstAgentPathCompletion = firstAgent.getHonoredInitialPathCompletion();
+        double secondAgentPathCompletion = secondAgent.getHonoredInitialPathCompletion();
+        
+        if (firstAgentPathCompletion > secondAgentPathCompletion) return -1;
+        else if (firstAgentPathCompletion == secondAgentPathCompletion) return 0;
+        else return 1;
+    }
+    
+    // which one of the two agents has priority based on overriding
+    // zero = neither agent overrode the other
+    // positive result = secondAgent overrode firstAgent = has priority
+    private int compareOverridingPriority(FARAgent firstAgent, Reservation secondAgentObstructingReservation) {
+        FARAgent secondAgent = secondAgentObstructingReservation.getAgent();
+        
+        boolean secondAgentOverride = false;
+        if (secondAgentObstructingReservation.hasOverridenAgent(firstAgent)) secondAgentOverride = true;
+        
+        if (secondAgentOverride) return 1;
+        else return 0;
+    }
+    
+    // which one of the two agents has priority based on direction of movement
+    // negative result = firstAgent has priority
+    // zero = the two agents have the same priority
+    // positive result = secondAgent has priority
+    private int compareDirectionPriority(int step, Element firstAgentComingFrom, Element firstAgentDestination, Element secondAgentComingFrom, Element secondAgentDestination) {
+        int firstAgentDirectionPriority = getPriority(step, firstAgentComingFrom, firstAgentDestination);
+        int secondAgentDirectionPriority = getPriority(step, secondAgentComingFrom, secondAgentDestination);
+        
+        if (firstAgentDirectionPriority < secondAgentDirectionPriority) return -1;
+        else if (firstAgentDirectionPriority == secondAgentDirectionPriority) return 0;
+        else return 1;
+    }
+    
+    // this roates the priority directions according to step
     // lower number is better
-    public int getPriority(int step, Element firstElement, Element secondElement) {
+    private int getPriority(int step, Element firstElement, Element secondElement) {
         if (firstElement.isEqual(secondElement)) return 4; // waiting
 
         int incrementor = step % 4;
@@ -387,44 +455,28 @@ public class FARPathfinder implements Pathfinder {
             int priority = (3 + incrementor) % 4;
             return priority;
         } else {
-            throw new RuntimeException();
-        }
-    }
-
-    private void reserve(FARAgent agent, ReservationType reservationType, Reservation previousReservation) {
-        if (reservationType == ReservationType.NORMAL || reservationType == ReservationType.PROXY) {
-            reserveMovement(agent, reservationType, previousReservation);
-        }
-        
-        else if (reservationType == ReservationType.WAIT) {
-            reserveWait(agent, reservationType, previousReservation);
-        }
-        
-        else if (reservationType == ReservationType.INITIAL) {
-            reserveInitial(agent, reservationType, previousReservation);
-        }
-        
-        else { // if reservationType is NULL
-            throw new RuntimeException();
+            System.out.println("ERROR: TRIED RESERVING FROM "+firstElement+" TO "+secondElement);
+            throw new RuntimeException("Tried reserving from "+firstElement+" to "+secondElement);
         }
     }
     
-    private void reserveMovement(FARAgent agent, ReservationType reservationType, Reservation previousReservation) {
+    private Reservation reserveMovement(FARAgent agent, ReservationType reservationType, Reservation previousReservation, Element elementToBeReserved, Element proxyTarget) {
         int currentStep;
         Element comingFrom;
         if (previousReservation == null) {
-            currentStep = 0;
-            comingFrom = agent.START;
+            System.out.println("ERROR: AGENT "+agent.FARAGENT_ID+" TRIED TO RESERVE MOVEMENT WITH A NULL PREVIOUS RESERVATION");
+            throw new RuntimeException("Agent "+agent.FARAGENT_ID+" tried to reserve movement with a null previous reservation");
         }
         else {
             currentStep = previousReservation.getStep() + 1;
             comingFrom = previousReservation.getElement();
         }
         
-        Element elementToBeReserved = agent.getPathElement(currentStep);
-
-        if (reservationType == ReservationType.NORMAL) System.out.println("\t\t\tReserving a normal reservation at element: "+elementToBeReserved+" (step "+currentStep+")");
-        else System.out.println("\t\t\tReserving a proxy reservation at element: "+elementToBeReserved+" (step "+currentStep+")");
+        printToScreen("Current agent: "+agent.FARAGENT_ID+" at element "+comingFrom);
+        
+        incrementPrintLevel(); // 3
+        if (reservationType == ReservationType.NORMAL) printToScreen("Reserving a normal reservation at element: "+elementToBeReserved+" (step "+currentStep+")");
+        else printToScreen("Reserving a proxy reservation at element: "+elementToBeReserved+" (step "+currentStep+")");
 
         Reservation obstructingReservation = elementToBeReserved.getFARExtension().getReservation(currentStep);
         Reservation obstructingGhostReservation = elementToBeReserved.getFARExtension().getGhostReservation(currentStep);
@@ -433,68 +485,89 @@ public class FARPathfinder implements Pathfinder {
         if (obstructingGhostReservation != null) obstructingGhostOriginalReservation = obstructingGhostReservation.getOriginalReservation();
         else obstructingGhostOriginalReservation = null;
 
-        //if (obstructingGhostOriginalReservation != null && obstructingGhostOriginalReservation.getElement() == comingFrom) { // head-on collision!
+        Reservation newReservation;
+        
+        incrementPrintLevel(); // 4
         if (obstructingGhostOriginalReservation != null && obstructingGhostOriginalReservation == comingFrom.getFARExtension().getReservation(currentStep)) {
             // head-on collision!
             
-            System.out.println("\t\t\t\tObstructing ghost reservation: "+obstructingGhostReservation);
-            System.out.println("\t\t\t\tPrevious reservation: "+previousReservation);
+            printToScreen("Obstructing ghost reservation: "+obstructingGhostReservation);
+            //printToScreen("Previous reservation: "+previousReservation);
 
-            int ghostReservationPriority = getPriority(currentStep, elementToBeReserved, comingFrom);
+            /*int ghostReservationPriority = getPriority(currentStep, elementToBeReserved, comingFrom);
             int intendedReservationPriority = getPriority(currentStep, comingFrom, elementToBeReserved);
             
-            if (ghostReservationPriority == intendedReservationPriority) {
-                throw new RuntimeException();
+            // if this agent was already overriden by the obstructing reservation
+            // make intended reservation weaker than the obstructing reservation can possibly be
+            if (obstructingGhostOriginalReservation.hasOverridenAgent(agent)) intendedReservationPriority = 5;*/
+            
+            int comparePriority = comparePriority(currentStep, previousReservation, obstructingGhostOriginalReservation, elementToBeReserved);
+            
+            //if (ghostReservationPriority == intendedReservationPriority) {
+            if (comparePriority == 0) {
+                FARAgent obstructingAgent = obstructingReservation.getAgent();
+                System.out.println("ERROR: AGENTS "+obstructingAgent.FARAGENT_ID+" (GHOST) AND "+agent.FARAGENT_ID+" TRIED TO PERFORM THE SAME RESERVATION OF ELEMENT: "+elementToBeReserved+" (step "+currentStep+")");
+                throw new RuntimeException("Agents "+obstructingAgent.FARAGENT_ID+" (ghost) and "+agent.FARAGENT_ID+" tried to perform the same reservation of element: "+elementToBeReserved+" (step "+currentStep+")");
             }
 
-            else if (ghostReservationPriority < intendedReservationPriority) {
+            else if (comparePriority > 0) {
                 // the ghost reservation overrules intended reservation
                 // current agent needs to move out of the way of the ghost's original agent
 
-                if (comingFrom.getFARExtension().isProxyAvailable(currentStep)) {
+                if (getProxyStarts(comingFrom, currentStep, null).size() > 0) {
                     // if current agent has a place to go
                     // keep the obstructing agent at its reserved position and move away
-
-                    FARAgent obstructingAgent = obstructingGhostOriginalReservation.getAgent();
-                    System.out.println("\t\t\t\tConflict; normal reservation changed to proxy because of head-on collision with agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingGhostOriginalReservation.getReservationIndex()+")"+" (step "+currentStep+")");
+                    printToScreen("Head-on collision; reserving a proxy because of ghost reservation: "+obstructingGhostReservation);
+                    
+                    obstructingGhostOriginalReservation.addOverridenAgent(agent);
                     
                     // add a proxy to current agent's path
-                    reserveProxyForAgent(agent, previousReservation);
+                    newReservation = reserveProxy(agent, previousReservation, proxyTarget);
                 }
 
                 else {
                     // there is no proxy available to current agent
+                    Reservation preObstructingGhostReservation = obstructingGhostReservation.getPreviousReservation();
                     
-                    Reservation preObstructingGhostOriginalReservation = obstructingGhostOriginalReservation.getPreviousReservation();
-                    
-                    if (preObstructingGhostOriginalReservation.getElement().getFARExtension().isProxyAvailable(currentStep)) {
+                    if (getProxyStarts(preObstructingGhostReservation.getElement(), currentStep, null).size() > 0) {
                         // if the ghost's original agent's previous reservation can be changed so that a proxy is chosen
-                        // WATCH OUT WITH RESERVATION INDICES - MIGHT NOT BE ABLE TO GO AT ALL BECAUSE OF NATURE OF RESERVATION
+
                         // evict obstructing reservation
-
-                        FARAgent obstructingAgent = obstructingGhostOriginalReservation.getAgent();
-                        System.out.println("\t\t\t\tConflict (head-on) with no proxy available; reservation evicts agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingGhostOriginalReservation.getReservationIndex()+")"+" (step "+currentStep+")");
-
-                        evictObstructingReservation(obstructingGhostOriginalReservation); // PROBLEM - HOW TO ENSURE THE AGENT DOESN'T RE-RESERVE THE ELEMENT?
+                        printToScreen("Head-on collision (no proxy available); evicting ghost original reservation: "+obstructingGhostOriginalReservation);
+                        
+                        Reservation firstRemovedReservation = evictObstructingReservation(obstructingGhostOriginalReservation);
 
                         // and set intended reservation to a be the reservation at current step
-                        reserveElementForAgent(agent, reservationType, previousReservation);
-
-                        System.out.println("\t\t\t\t\tNew reservation: "+elementToBeReserved.getFARExtension().getReservation(currentStep));
+                        //newReservation = reserveElementForAgent(agent, reservationType, previousReservation, elementToBeReserved, proxyTarget);
+                        newReservation = reserveMovement(agent, reservationType, previousReservation, elementToBeReserved, proxyTarget);
+                        newReservation.addOverridenAgent(obstructingGhostOriginalReservation.getAgent());
+                        
+                        // repair obstructing proxy reservation, if needed
+                        if (firstRemovedReservation != null) {
+                            if (firstRemovedReservation.isProxyReservation()) {
+                                repairProxy(firstRemovedReservation.getAgent(), firstRemovedReservation.getPreviousReservation(), firstRemovedReservation.getProxyTarget());
+                            }
+                        }
                     }
 
                     else {
                         // there is no proxy available to either one of the agents
-                        // evict obstructing reservation of them and make them both wait
-                        
-                        FARAgent obstructingAgent = obstructingGhostOriginalReservation.getAgent();
-                        System.out.println("\t\t\t\tConflict (head-on) with no proxy available; reservation evicts agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingGhostOriginalReservation.getReservationIndex()+")"+" (step "+currentStep+")");
+                        // evict obstructing reservation and make them both wait
+                        printToScreen("Head-on collision (no proxy available); evicting ghost original reservation: "+obstructingGhostOriginalReservation);
 
-                        evictObstructingReservation(obstructingGhostOriginalReservation); // PROBLEM - HOW TO ENSURE THE AGENT DOESN'T RE-RESERVE THE ELEMENT?
+                        Reservation firstRemovedReservation = evictObstructingReservation(obstructingGhostOriginalReservation);
 
                         // and change intended reservation to a wait reservation
-                        System.out.println("\t\t\t\tConflict (head-on); agent has to replan with a wait reservation because of agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingGhostOriginalReservation.getReservationIndex()+")"+" (step "+currentStep+")");
-                        reserve(agent, ReservationType.WAIT, previousReservation); // IMPORTANT
+                        printToScreen("Head-on collision (no proxy available); waiting because of ghost reservation: "+obstructingGhostReservation);
+                        newReservation = reserveWait(agent, ReservationType.WAIT, previousReservation, comingFrom, proxyTarget);
+                        newReservation.addOverridenAgent(obstructingGhostOriginalReservation.getAgent());
+                        
+                        // repair obstructing proxy reservation, if needed
+                        if (firstRemovedReservation != null) {
+                            if (firstRemovedReservation.isProxyReservation()) {
+                                repairProxy(firstRemovedReservation.getAgent(), firstRemovedReservation.getPreviousReservation(), firstRemovedReservation.getProxyTarget());
+                            }
+                        }
                     }
                 }
             }
@@ -503,20 +576,25 @@ public class FARPathfinder implements Pathfinder {
                 // intended reservation overwrites the ghost reservation
                 // ghost's original agent needs to move out of the way of the current agent
                 
-                Reservation preObstructingGhostOriginalReservation = obstructingGhostOriginalReservation.getPreviousReservation();
+                Reservation preObstructingGhostReservation = obstructingGhostReservation.getPreviousReservation();
                 
-                if (preObstructingGhostOriginalReservation.getElement().getFARExtension().isProxyAvailable(currentStep)) {
+                if (getProxyStarts(preObstructingGhostReservation.getElement(), currentStep, null).size() > 0) {
                     // rewrite obstructing reservation since there is a proxy path available
-                    
-                    FARAgent obstructingAgent = obstructingGhostOriginalReservation.getAgent();
-                    System.out.println("\t\t\t\tConflict (head-on); reservation evicts agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingGhostOriginalReservation.getReservationIndex()+")"+" (step "+currentStep+")");
+                    printToScreen("Head-on collision; evicting ghost original reservation: "+obstructingGhostOriginalReservation);
 
-                    evictObstructingReservation(obstructingGhostOriginalReservation);
+                    Reservation firstRemovedReservation = evictObstructingReservation(obstructingGhostOriginalReservation);
 
                     // set reservation to be intended reservation
-                    reserveElementForAgent(agent, reservationType, previousReservation);
-
-                    System.out.println("\t\t\t\t\tNew reservation: "+elementToBeReserved.getFARExtension().getReservation(currentStep));
+                    //newReservation = reserveElementForAgent(agent, reservationType, previousReservation, elementToBeReserved, proxyTarget);
+                    newReservation = reserveMovement(agent, reservationType, previousReservation, elementToBeReserved, proxyTarget);
+                    newReservation.addOverridenAgent(obstructingGhostOriginalReservation.getAgent());
+                    
+                    // repair obstructing proxy reservation, if needed
+                    if (firstRemovedReservation != null) {
+                        if (firstRemovedReservation.isProxyReservation()) {
+                            repairProxy(firstRemovedReservation.getAgent(), firstRemovedReservation.getPreviousReservation(), firstRemovedReservation.getProxyTarget());
+                        }
+                    }
                 }
 
                 else {
@@ -524,27 +602,34 @@ public class FARPathfinder implements Pathfinder {
                     // keep obstructing reservation
                     // can current agent move to a proxy?
                     
-                    if (comingFrom.getFARExtension().isProxyAvailable(currentStep)) {
+                    if (getProxyStarts(comingFrom, currentStep, null).size() > 0) {
                         // if current agent has a place to go
                         // keep the obstructing agent at its reserved position and move away
+                        printToScreen("Head-on collision; reserving a proxy because of ghost reservation: "+obstructingGhostReservation);
 
-                        FARAgent obstructingAgent = obstructingGhostOriginalReservation.getAgent();
-                        System.out.println("\t\t\t\tConflict; normal reservation changed to proxy because of head-on collision with agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingGhostOriginalReservation.getReservationIndex()+")"+" (step "+currentStep+")");
-
+                        obstructingGhostOriginalReservation.addOverridenAgent(agent);
+                        
                         // add a proxy to current agent's path
-                        reserveProxyForAgent(agent, previousReservation);
+                        newReservation = reserveProxy(agent, previousReservation, proxyTarget);
                     }
                     
                     else {
                         // neither agent can move to a proxy
-                        FARAgent obstructingAgent = obstructingGhostOriginalReservation.getAgent();
-                        System.out.println("\t\t\t\tConflict (head-on) with no proxy available; reservation evicts agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingGhostOriginalReservation.getReservationIndex()+")"+" (step "+currentStep+")");
+                        printToScreen("Head-on collision (no proxy available); evicting ghost original reservation: "+obstructingGhostOriginalReservation);
 
-                        evictObstructingReservation(obstructingGhostOriginalReservation); // PROBLEM - HOW TO ENSURE THE AGENT DOESN'T RE-RESERVE THE ELEMENT?
-
+                        Reservation firstRemovedReservation = evictObstructingReservation(obstructingGhostOriginalReservation);
+                        
                         // and change intended reservation to a wait reservation
-                        System.out.println("\t\t\t\tConflict (head-on); agent has to replan with a wait reservation because of agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingGhostOriginalReservation.getReservationIndex()+")"+" (step "+currentStep+")");
-                        reserve(agent, ReservationType.WAIT, previousReservation); // IMPORTANT
+                        printToScreen("Head-on collision (no proxy available); waiting because of ghost reservation: "+obstructingGhostReservation);
+                        newReservation = reserveWait(agent, ReservationType.WAIT, previousReservation, comingFrom, proxyTarget);
+                        newReservation.addOverridenAgent(obstructingGhostOriginalReservation.getAgent());
+                        
+                        // repair obstructing proxy reservation, if needed
+                        if (firstRemovedReservation != null) {
+                            if (firstRemovedReservation.isProxyReservation()) {
+                                repairProxy(firstRemovedReservation.getAgent(), firstRemovedReservation.getPreviousReservation(), firstRemovedReservation.getProxyTarget());
+                            }
+                        }
                     }
                 }
             } 
@@ -553,159 +638,222 @@ public class FARPathfinder implements Pathfinder {
         else if (obstructingReservation == null) {
             // if there is no reservation at the currentStep
             // reserve this element for the current agent
-            reserveElementForAgent(agent, reservationType, previousReservation);
+            newReservation = reserveElementForAgent(agent, reservationType, previousReservation, elementToBeReserved, proxyTarget);
         }
 
         else {
             // side-on collision
             
-            System.out.println("\t\t\t\tObstructing reservation: "+obstructingReservation);
-            System.out.println("\t\t\t\tPrevious reservation: "+previousReservation);
+            printToScreen("Obstructing reservation: "+obstructingReservation);
+            //printToScreen("Previous reservation: "+previousReservation);
 
-            int obstructingReservationPriority = getPriority(currentStep, obstructingReservation.getCameFrom(), elementToBeReserved);
-            int intendedReservationPriority = getPriority(currentStep, comingFrom, elementToBeReserved); // THIS IS THE PROBLEM
-                        
-            if (obstructingReservationPriority == intendedReservationPriority) {
+            /*int obstructingReservationPriority = getPriority(currentStep, obstructingReservation.getCameFrom(), elementToBeReserved);
+            int intendedReservationPriority = getPriority(currentStep, comingFrom, elementToBeReserved);
+            
+            // if this agent was already overriden by the obstructing reservation
+            // make intended reservation weaker than the obstructing reservation can possibly be
+            if (obstructingReservation.hasOverridenAgent(agent)) intendedReservationPriority = 5;*/
+            
+            int comparePriority = comparePriority(currentStep, previousReservation, obstructingReservation, elementToBeReserved);
+            
+            if (comparePriority == 0) {
                 // should not happen
-                throw new RuntimeException();
+                FARAgent obstructingAgent = obstructingReservation.getAgent();
+                System.out.println("ERROR: AGENTS "+obstructingAgent.FARAGENT_ID+" AND "+agent.FARAGENT_ID+" TRIED TO PERFORM THE SAME RESERVATION OF ELEMENT: "+elementToBeReserved+" (step "+currentStep+")");
+                throw new RuntimeException("Agents "+obstructingAgent.FARAGENT_ID+" and "+agent.FARAGENT_ID+" tried to perform the same reservation of element: "+elementToBeReserved+" (step "+currentStep+")");
             }
 
-            else if (obstructingReservationPriority < intendedReservationPriority) {
+            else if (comparePriority > 0) {
                 // obstructing reservation overrules intended reservation
                 // keep the obstructing reservation
 
+                obstructingReservation.addOverridenAgent(agent);
+                
                 // intended reservation needs to be replanned as wait reservation
-                System.out.println("\t\t\t\tConflict; agent has to replan with a wait reservation because of agent: "+obstructingReservation.getAgent().FARAGENT_ID+" (step "+currentStep+")");
-                reserve(agent, ReservationType.WAIT, previousReservation);
+                printToScreen("Side-on collision; waiting because of reservation: "+obstructingReservation);
+                newReservation = reserveWait(agent, ReservationType.WAIT, previousReservation, comingFrom, proxyTarget);
             }
-
+            
             else {
                 // new reservation overwrites existing reservation
                 
                 if (obstructingReservation.isNormalReservation() || obstructingReservation.isProxyReservation()) {
                     // if obstructing reservation is movement reservation
-                    
-                    FARAgent obstructingAgent = obstructingReservation.getAgent();
-                    System.out.println("\t\t\t\tConflict; agent overrides existing non-wait reservation of: "+obstructingAgent.FARAGENT_ID+" ("+obstructingReservation.getReservationIndex()+")"+" (step "+currentStep+")");
+                    printToScreen("Side-on collision; evicting reservation: "+obstructingReservation);
 
                     // make the obstructing agent move
-                    evictObstructingReservation(obstructingReservation);
+                    Reservation firstRemovedReservation = evictObstructingReservation(obstructingReservation);
 
                     // rewrite reservation for the intended reservation
-                    reserveElementForAgent(agent, reservationType, previousReservation);
-
-                    System.out.println("\t\t\t\t\tNew reservation: "+elementToBeReserved.getFARExtension().getReservation(currentStep));
+                    newReservation = reserveElementForAgent(agent, reservationType, previousReservation, elementToBeReserved, proxyTarget);
+                    newReservation.addOverridenAgent(obstructingReservation.getAgent());
+                    
+                    // repair obstructing proxy reservation, if needed
+                    if (firstRemovedReservation != null) {
+                        if (firstRemovedReservation.isProxyReservation()) {
+                            repairProxy(firstRemovedReservation.getAgent(), firstRemovedReservation.getPreviousReservation(), firstRemovedReservation.getProxyTarget());
+                        }
+                    }
                 }
 
                 else {
                     // if obstructing reservation is a wait reservation or an initial reservation
                     
-                    if (elementToBeReserved.getFARExtension().isProxyAvailable(currentStep)) {
-                        // remove obstructing reservation since there is a proxy path available for it
-                        
-                        FARAgent obstructingAgent = obstructingReservation.getAgent();
-                        if (obstructingReservation.isWaitReservation()) System.out.println("\t\t\t\tConflict; agent overrides existing wait reservation of: "+obstructingAgent.FARAGENT_ID+" ("+obstructingReservation.getReservationIndex()+")"+" (step "+currentStep+")");
-                        else System.out.println("\t\t\t\tConflict; agent overrides existing initial reservation of: "+obstructingAgent.FARAGENT_ID+" ("+obstructingReservation.getReservationIndex()+")"+" (step "+currentStep+")");
+                    if (getProxyStarts(elementToBeReserved, currentStep, null).size() > 0) {
+                        // there is a proxy path available for the obstructing reservation
+                        // reserve proxy for the obstructing agent
+                        printToScreen("Wait conflict; evicting reservation: "+obstructingReservation);
 
                         // make the obstructing agent move
-                        evictObstructingReservation(obstructingReservation);
+                        Reservation firstRemovedReservation = evictObstructingReservation(obstructingReservation);
 
                         // rewrite reservation for the intended reservation
-                        reserveElementForAgent(agent, reservationType, previousReservation);
-
-                        System.out.println("\t\t\t\t\tNew reservation: "+elementToBeReserved.getFARExtension().getReservation(currentStep));
+                        newReservation = reserveElementForAgent(agent, reservationType, previousReservation, elementToBeReserved, proxyTarget);
+                        newReservation.addOverridenAgent(obstructingReservation.getAgent());
+                        
+                        // repair obstructing proxy reservation, if needed
+                        if (firstRemovedReservation != null) {
+                            if (firstRemovedReservation.isProxyReservation()) {
+                                repairProxy(firstRemovedReservation.getAgent(), firstRemovedReservation.getPreviousReservation(), firstRemovedReservation.getProxyTarget());
+                            }
+                        }
                     }
 
                     else {
                         // there is no proxy the waiting element could take
                         // keep the obstructing reservation
                         
+                        obstructingReservation.addOverridenAgent(agent);
+                        
                         // intended reservation needs to be replanned as wait reservation
-                        System.out.println("\t\t\t\tConflict; agent has to replan with a wait reservation because of agent: "+obstructingReservation.getAgent().FARAGENT_ID+" ("+obstructingReservation.getReservationIndex()+")"+" (step "+currentStep+")");
-                        reserve(agent, ReservationType.WAIT, previousReservation);
+                        printToScreen("Wait conflict (no proxy available); waiting because of reservation: "+obstructingReservation);
+                        newReservation = reserveWait(agent, ReservationType.WAIT, previousReservation, comingFrom, proxyTarget);
                     }
                 }
             }
         }
+        decrementPrintLevel(); // 3
+        
+        printToScreen("New reservation: "+newReservation);
+        decrementPrintLevel(); // 2
+        
+        return newReservation;
     }
     
-    private void reserveWait(FARAgent agent, ReservationType reservationType, Reservation previousReservation) {
+    private Reservation reserveWait(FARAgent agent, ReservationType reservationType, Reservation previousReservation, Element elementToBeReserved, Element proxyTarget) {
         int currentStep;
         Element comingFrom;
         if (previousReservation == null) {
-            currentStep = 0;
-            comingFrom = agent.START;
+            System.out.println("ERROR: AGENT "+agent.FARAGENT_ID+" TRIED TO RESERVE WAIT WITH A NULL PREVIOUS RESERVATION");
+            throw new RuntimeException("Agent "+agent.FARAGENT_ID+" tried to reserve wait with a null previous reservation");
         }
         else {
             currentStep = previousReservation.getStep() + 1;
             comingFrom = previousReservation.getElement();
         }
         
-        Element elementToBeReserved = comingFrom;
-
-        System.out.println("\t\t\tWait at element: "+elementToBeReserved+" (step "+currentStep+")");
+        printToScreen("Current agent: "+agent.FARAGENT_ID+" at element "+comingFrom);
+        
+        incrementPrintLevel(); // 3
+        printToScreen("Reserving a wait reservation at element: "+elementToBeReserved+" (step "+currentStep+")");
 
         Reservation obstructingReservation = elementToBeReserved.getFARExtension().getReservation(currentStep);
 
+        Reservation newReservation;
+        
+        incrementPrintLevel(); // 4
         if (obstructingReservation == null) {
             // there is no obstructing reservation at element at current step
             // reserve this element for the current agent
-            reserveElementForAgent(agent, reservationType, previousReservation);
+            newReservation = reserveElementForAgent(agent, reservationType, previousReservation, elementToBeReserved, proxyTarget);
+            
+            // if this wait has been inserted into a proxy, repair the proxy
+            if (proxyTarget != null && newReservation.getStep() < FAILURE_CRITERION) {
+                newReservation = repairProxy(agent, newReservation, proxyTarget);
+            }
         }
 
         else {
             // there is a reservation at the currentStep
             
-            System.out.println("\t\t\t\tExisting reservation: "+obstructingReservation);
-            System.out.println("\t\t\t\tPrevious reservation: "+previousReservation);
+            printToScreen("Obstructing reservation: "+obstructingReservation);
+            //printToScreen("Previous reservation: "+previousReservation);
             
-            int obstructingReservationPriority = getPriority(currentStep, obstructingReservation.getCameFrom(), elementToBeReserved);
-            int intendedReservationPriority = getPriority(currentStep, comingFrom, elementToBeReserved); // THIS IS THE PROBLEM
+            /*int obstructingReservationPriority = getPriority(currentStep, obstructingReservation.getCameFrom(), elementToBeReserved);
+            int intendedReservationPriority = getPriority(currentStep, comingFrom, elementToBeReserved);
 
-            if (obstructingReservationPriority == intendedReservationPriority) {
-                throw new RuntimeException();
+            // if this agent was already overriden by the obstructing reservation
+            // make intended reservation weaker than the obstructing reservation can possibly be
+            if (obstructingReservation.hasOverridenAgent(agent)) intendedReservationPriority = 5;*/
+            
+            int comparePriority = comparePriority(currentStep, previousReservation, obstructingReservation, elementToBeReserved);
+            
+            if (comparePriority == 0) {
+                FARAgent obstructingAgent = obstructingReservation.getAgent();
+                System.out.println("ERROR: AGENTS "+obstructingAgent.FARAGENT_ID+" (GHOST) AND "+agent.FARAGENT_ID+" TRIED TO PERFORM THE SAME RESERVATION OF ELEMENT: "+elementToBeReserved+" (step "+currentStep+")");
+                throw new RuntimeException("Agents "+obstructingAgent.FARAGENT_ID+" (ghost) and "+agent.FARAGENT_ID+" tried to perform the same reservation of element: "+elementToBeReserved+" (step "+currentStep+")");
             }
 
-            else if (obstructingReservationPriority < intendedReservationPriority) {
+            else if (comparePriority > 0) {
                 // existing reservation overrules new reservation - ALWAYS
-                // there are some decisions to be done about optimization here - does wait always give way?
                 // intended reservation needs to be replanned
 
-                if (elementToBeReserved.getFARExtension().isProxyAvailable(currentStep)) {
-                    // a proxy is available instead of intended reservation
-                    // keep existing reservation
-
+                if (getProxyStarts(elementToBeReserved, currentStep, null).size() > 0) {
+                    // a proxy is available instead of intended wait reservation
+                    // keep obstructing reservation
+                    printToScreen("Wait conflict; reserving a proxy because of reservation: "+obstructingReservation);
+                    
+                    obstructingReservation.addOverridenAgent(agent);
+                    
                     // reserve current agent for a proxy
-                    FARAgent obstructingAgent = obstructingReservation.getAgent();
-                    System.out.println("\t\t\t\tConflict; wait reservation changed to proxy because of agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingReservation.getReservationIndex()+")"+" (step "+currentStep+")");
-
-                    reserveProxyForAgent(agent, previousReservation);
+                    // proxyTarget may be null
+                    // (that means that this started off as a normal wait reservation)
+                    // if proxyTarget is null, it will be automatically assigned by reserveProxy
+                    newReservation = reserveProxy(agent, previousReservation, proxyTarget);
                 }
 
                 else {
-                    // there is no proxy current agent could take
+                    // there is no proxy this agent could take
                     // evict obstructing reservation
-                    
-                    FARAgent existingAgent = obstructingReservation.getAgent();
-                    System.out.println("\t\t\t\tConflict with no proxy available; wait reservation evicts agent: "+existingAgent.FARAGENT_ID+" ("+obstructingReservation.getReservationIndex()+")"+" (step "+currentStep+")");
+                    printToScreen("Wait conflict (no proxy available); evicting reservation: "+obstructingReservation);
 
-                    evictObstructingReservation(obstructingReservation);
+                    Reservation firstRemovedReservation = evictObstructingReservation(obstructingReservation);
 
                     // proceed with the intended plan and reserve a wait at the element
-                    reserveElementForAgent(agent, reservationType, previousReservation);
-
-                    System.out.println("\t\t\t\t\tNew reservation: "+elementToBeReserved.getFARExtension().getReservation(currentStep));
+                    newReservation = reserveElementForAgent(agent, reservationType, previousReservation, elementToBeReserved, proxyTarget);
+                    newReservation.addOverridenAgent(obstructingReservation.getAgent());
+                    
+                    // if this wait has been inserted into a proxy, repair the proxy
+                    if (proxyTarget != null && newReservation.getStep() < FAILURE_CRITERION) {
+                        newReservation = repairProxy(agent, newReservation, proxyTarget);
+                    }
+                    
+                    // repair obstructing proxy reservation, if needed
+                    if (firstRemovedReservation != null) {
+                        if (firstRemovedReservation.isProxyReservation()) {
+                            repairProxy(firstRemovedReservation.getAgent(), firstRemovedReservation.getPreviousReservation(), firstRemovedReservation.getProxyTarget());
+                        }
+                    }
                 }
             }
 
             else {
                 // new reservation overwrites existing reservation - NEVER
-                throw new RuntimeException();
+                System.out.println("ERROR: A WAIT RESERVATION TRIED TO OVERWRITE EXISTING NON-WAIT RESERVATION AT ELEMENT: "+elementToBeReserved+" (step "+currentStep+")");
+                throw new RuntimeException("A wait reservation tried to overwrite existing non-wait reservation at element: "+elementToBeReserved+" (step "+currentStep+")");
             }
         }
+        decrementPrintLevel(); // 3
+        
+        printToScreen("New reservation: "+newReservation);
+        decrementPrintLevel(); // 2
+        
+        return newReservation;
     }
     
-    private void reserveInitial(FARAgent agent, ReservationType reservationType, Reservation previousReservation) {
+    private Reservation reserveInitial(FARAgent agent, ReservationType reservationType, Reservation previousReservation, Element elementToBeReserved) {
+        // proxyTarget not provided becaue there is no situation in which it would happen
+        
         int currentStep;
         Element comingFrom;
         if (previousReservation == null) {
@@ -717,227 +865,308 @@ public class FARPathfinder implements Pathfinder {
             comingFrom = previousReservation.getElement();
         }
         
-        Element elementToBeReserved = comingFrom;
-
-        System.out.println("\t\t\tInitial reservation at element: "+elementToBeReserved+" (step "+currentStep+")");
+        printToScreen("Current agent: "+agent.FARAGENT_ID+" at element "+comingFrom);
+        
+        incrementPrintLevel(); // 3
+        printToScreen("Reserving an initial reservation at element: "+elementToBeReserved+" (step "+currentStep+")");
 
         Reservation obstructingReservation = elementToBeReserved.getFARExtension().getReservation(currentStep);
 
-        if (obstructingReservation == null) { // if there is no reservation at the currentStep
+        Reservation newReservation;
+        
+        incrementPrintLevel(); // 4
+        if (obstructingReservation == null) {
+            // if there is no reservation at the currentStep
             // reserve this element for the current agent
-            reserveElementForAgent(agent, reservationType, previousReservation);
+            
+            newReservation = reserveElementForAgent(agent, reservationType, previousReservation, elementToBeReserved, null);
         }
 
-        else { // there is a reservation at the currentStep
-            System.out.println("\t\t\t\tObstructing reservation: "+obstructingReservation);
-            System.out.println("\t\t\t\tPrevious reservation: "+previousReservation);
+        else {
+            // there is a reservation at the currentStep
             
-            int obstructingReservationPriority = getPriority(currentStep, obstructingReservation.getCameFrom(), elementToBeReserved);
+            printToScreen("Obstructing reservation: "+obstructingReservation);
+            //printToScreen("Previous reservation: "+previousReservation);
+            
+            /*int obstructingReservationPriority = getPriority(currentStep, obstructingReservation.getCameFrom(), elementToBeReserved);
             int intendedReservationPriority = getPriority(currentStep, comingFrom, elementToBeReserved);
 
-            if (obstructingReservationPriority == intendedReservationPriority) {
-                throw new RuntimeException();
+            // if this agent was already overriden by the obstructing reservation
+            // make intended reservation weaker than the obstructing reservation can possibly be
+            if (obstructingReservation.hasOverridenAgent(agent)) intendedReservationPriority = 5;*/
+            
+            int comparePriority = comparePriority(currentStep, previousReservation, obstructingReservation, elementToBeReserved);
+            
+            if (comparePriority == 0) {
+                FARAgent obstructingAgent = obstructingReservation.getAgent();
+                System.out.println("ERROR: AGENTS "+obstructingAgent.FARAGENT_ID+" AND "+agent.FARAGENT_ID+" TRIED TO PERFORM THE SAME RESERVATION OF ELEMENT: "+elementToBeReserved+" (step "+currentStep+")");
+                throw new RuntimeException("Agents "+obstructingAgent.FARAGENT_ID+" and "+agent.FARAGENT_ID+" tried to perform the same reservation of element: "+elementToBeReserved+" (step "+currentStep+")");
             }
 
-            else if (obstructingReservationPriority < intendedReservationPriority) {
+            else if (comparePriority > 0) {
                 // obstructing reservation overrules intended reservation - ALWAYS
-                // there are some decisions to be done about optimization here - does wait always give way?
-                // intended reservation needs to be replanned
+                // intended reservation needs to be replanned as a proxy
                 
-                if (comingFrom.getFARExtension().isProxyAvailable(currentStep)) {
-                    // if there is a proxy path current agent could take
+                if (getProxyStarts(comingFrom, currentStep, null).size() > 0) {
+                    // if there is a proxy path this agent could take
                     // keep obstructing reservation
-
+                    printToScreen("Wait conflict; reserving a proxy because of reservation: "+obstructingReservation);
+                    
+                    obstructingReservation.addOverridenAgent(agent);
+                    
                     // rewrite intended reservation since there is a proxy path available for it
-                    FARAgent obstructingAgent = obstructingReservation.getAgent();
-                    System.out.println("\t\t\t\tConflict; initial reservation changed to proxy because of agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingReservation.getReservationIndex()+")"+" (step "+currentStep+")");
-
-                    reserveProxyForAgent(agent, previousReservation);
+                    newReservation = reserveProxy(agent, previousReservation, null);
                 }
 
                 else {
-                    // there is no proxy current agent could take
+                    // there is no proxy this agent could take
                     // evict obstructing reservation
-                    FARAgent obstructingAgent = obstructingReservation.getAgent();
-                    System.out.println("\t\t\t\tConflict with no proxy available; initial reservation evicts agent: "+obstructingAgent.FARAGENT_ID+" ("+obstructingReservation.getReservationIndex()+")"+" (step "+currentStep+")");
+                    printToScreen("Wait conflict (no proxy available); evicting reservation: "+obstructingReservation);
 
-                    evictObstructingReservation(obstructingReservation);
+                    Reservation firstRemovedReservation = evictObstructingReservation(obstructingReservation);
 
                     // reserve for current agent according to intended plan
-                    reserveElementForAgent(agent, reservationType, previousReservation);
-
-                    System.out.println("\t\t\t\t\tNew reservation: "+elementToBeReserved.getFARExtension().getReservation(currentStep));
+                    newReservation = reserveElementForAgent(agent, reservationType, previousReservation, elementToBeReserved, null);
+                    newReservation.addOverridenAgent(obstructingReservation.getAgent());
+                    
+                    // repair obstructing proxy reservation, if needed
+                    if (firstRemovedReservation != null) {
+                        if (firstRemovedReservation.isProxyReservation()) {
+                            repairProxy(firstRemovedReservation.getAgent(), firstRemovedReservation.getPreviousReservation(), firstRemovedReservation.getProxyTarget());
+                        }
+                    }
                 }
             }
 
             else { // new reservation overwrites existing reservation - NEVER
-                throw new RuntimeException();
+                System.out.println("ERROR: AN INITIAL RESERVATION TRIED TO OVERWRITE EXISTING NON-WAIT RESERVATION AT ELEMENT: "+elementToBeReserved+" (step "+currentStep+")");
+                throw new RuntimeException("An initial reservation tried to overwrite existing non-wait reservation at elemnt: "+elementToBeReserved+" (step "+currentStep+")");
             }
         }
-    }
-    
-    private boolean wasOverriden(FARAgent agent, Reservation obstructingReservation) {
-        // determines whether the agent was already overriden by this obstructingReservation
-        // is it necessary to specify previousReservation or is the information sufficient?
+        decrementPrintLevel(); // 3
         
-        Reservation overridenReservation = obstructingReservation.searchOverridenReservation(agent);
-        if (overridenReservation != null) return true;
-        else return false;
+        printToScreen("New reservation: "+newReservation);
+        decrementPrintLevel(); // 2
+        
+        return newReservation;
     }
     
-    private void reserveProxyForAgent(FARAgent agent, Reservation previousReservation) {
+    private Reservation reserveProxy(FARAgent agent, Reservation previousReservation, Element proxyTarget) {
         //reservationElement.getFARExtension().setIsProxy(true);
 
         int currentStep;
-        int reservationIndex;
         Element comingFrom;
         
         if (previousReservation == null) {
             // should not happen
             throw new RuntimeException();
-            
-            /*currentStep = 0;
-            reservationIndex = RESERVATION_DEPTH-agent.getAgentGroup()-1;
-            comingFrom = agent.START;*/
         }
         else {
             currentStep = previousReservation.getStep() + 1;
-            reservationIndex = (previousReservation.getReservationIndex() + 1) % RESERVATION_DEPTH;
+            comingFrom = previousReservation.getElement();
+        }
+                
+        // creating proxy path
+        Element proxyStart = getRandomProxyStart(getProxyStarts(comingFrom, currentStep, null));
+        if (proxyTarget == null) proxyTarget = comingFrom;
+        
+        if (proxyStart == null) {
+            System.out.println("ERROR: AGENT "+agent.FARAGENT_ID+" TRIED TO RESERVE A PROXY PATH WITHOUT POSSIBLE START");
+            throw new RuntimeException("Agent "+agent.FARAGENT_ID+" tried to reserve a proxy path without any possible start");
+        }
+        
+        incrementPrintLevel(); // 5
+        printToScreen("Finding proxy path for agent "+agent.FARAGENT_ID+" with start at "+proxyStart+" and end at "+proxyTarget);
+        List proxyPath = getProxyPath(proxyStart, proxyTarget);
+        // proxy path should be inserted after the last okay element
+        
+        // making corresponding reservation
+        Reservation newReservation = reserveElementForAgent(agent, ReservationType.PROXY, previousReservation, proxyStart, proxyTarget);
+        
+        incrementPrintLevel(); // 5
+        printToScreen("New reservation: "+newReservation);
+        decrementPrintLevel(); // 4
+        
+        Reservation previousIterationReservation;
+        Reservation currentIterationReservation = newReservation;
+        int previousFutureReservationsListSize;
+        int currentFutureReservationListSize = agent.getFutureReservationListSize();
+        Element elementToBeReserved;
+
+        for (int i = 1; i < (proxyPath.size()); i++) {
+            if (currentIterationReservation.getStep() >= FAILURE_CRITERION) break; // to prevent reservations at impossible times
+
+            // get the appropriate element from proxy path
+            elementToBeReserved = (Element) proxyPath.getNodeData(i);
+
+            // save current variables as previous
+            previousIterationReservation = currentIterationReservation;
+            previousFutureReservationsListSize = currentFutureReservationListSize;
+
+            // reserve new reservation and set it to be current reservation
+            // update future reservation list size
+            newReservation = currentIterationReservation = reserveMovement(agent, ReservationType.PROXY, previousIterationReservation, elementToBeReserved, proxyTarget);
+            currentFutureReservationListSize = agent.getFutureReservationListSize();
+
+            if (currentFutureReservationListSize > (previousFutureReservationsListSize + 1)) {
+                // if current future reservation list size increased by more than one
+                // that was not a simple reservation, but some repairs were involved
+                // do not continue with this
+                break;
+            }
+        }
+
+        decrementPrintLevel(); // 4
+        
+        return newReservation;
+    }
+    
+    private Reservation repairProxy(FARAgent agent, Reservation previousReservation, Element proxyTarget) {
+        if (proxyTarget == null) {
+            throw new RuntimeException();
+        }
+                
+        int currentStep;
+        Element comingFrom;
+        
+        if (previousReservation == null) {
+            // should not happen
+            throw new RuntimeException();
+        }
+        else {
+            currentStep = previousReservation.getStep() + 1;
             comingFrom = previousReservation.getElement();
         }
         
         // creating proxy path
-        List proxyPath = comingFrom.getFARExtension().getProxyPath(currentStep);
-        // proxy path should be inserted after the last okay element
-
-        Element proxyStart = (Element) proxyPath.getNodeData(0);
-
-        //List agentPath = previousReservation.getReservationPath();
-
-        /*for (int i = 0; i < proxyPath.size(); i++) { // ADDING THE PROXY PATH TO THE AGENT PATH
-            Element currentProxyElement = (Element) proxyPath.getNodeData(i);
-            agentPath.insertAsNode(currentProxyElement, currentStep+i);
-        }*/
+        Element proxyStart = getRandomProxyStart(getProxyStarts(comingFrom, currentStep, null));
         
-        // adding proxy path to agent's path
-        agent.insertPathSegment(currentStep, proxyPath);
-
-        // making corresponding reservation
-        Reservation newReservation = new Reservation(ReservationType.PROXY, proxyStart, agent, reservationIndex, currentStep, previousReservation); // CHECK IF THIS IS CORRECT
-        //newReservation.setReservationPath(agentPath);
+        incrementPrintLevel(); // 5
+        printToScreen("Repairing proxy path for agent "+agent.FARAGENT_ID+" with start at "+proxyStart+" and end at "+proxyTarget);
         
-        Reservation newGhostReservation = new Reservation(ReservationType.GHOST, comingFrom, agent, reservationIndex, currentStep);
-        newGhostReservation.setOriginalReservation(newReservation);
-        newReservation.setGhostReservation(newGhostReservation);
+        Reservation newReservation = null;
+        if (proxyStart == null) {
+            // reserve wait at previous reservation
+            // this calls a repair proxy by itself
+            newReservation = reserveWait(agent, ReservationType.WAIT, previousReservation, comingFrom, proxyTarget);            
+        }
+        else {
+            List proxyPath = getProxyPath(proxyStart, proxyTarget);
 
-        // adding reservation to element
-        proxyStart.getFARExtension().setReservation(currentStep, newReservation);
-        comingFrom.getFARExtension().setGhostReservation(currentStep, newGhostReservation);
+            Reservation previousIterationReservation;
+            Reservation currentIterationReservation = previousReservation;
+            int previousFutureReservationsListSize;
+            int currentFutureReservationListSize = agent.getFutureReservationListSize();
+            Element elementToBeReserved;
+            
+            for (int i = 0; i < (proxyPath.size()); i++) {
+                if (currentIterationReservation.getStep() >= FAILURE_CRITERION) break; // to prevent reservations at impossible times
+                
+                // get the appropriate element from proxy path
+                elementToBeReserved = (Element) proxyPath.getNodeData(i);
 
-        // linking reservation
-        previousReservation.setDependentReservation(newReservation);
+                // save current variables as previous
+                previousIterationReservation = currentIterationReservation;
+                previousFutureReservationsListSize = currentFutureReservationListSize;
+
+                // reserve new reservation and set it to be current reservation
+                // update future reservation list size
+                newReservation = currentIterationReservation = reserveMovement(agent, ReservationType.PROXY, previousIterationReservation, elementToBeReserved, proxyTarget);
+                currentFutureReservationListSize = agent.getFutureReservationListSize();
+                
+                if (currentFutureReservationListSize > (previousFutureReservationsListSize + 1)) {
+                    // if current future reservation list size increased by more than one
+                    // that was not a simple reservation, but some repairs were involved
+                    // do not continue with this
+                    break;
+                }
+            }
+        }
         
-        // acknowledging reservation at the agent
-        agent.setLastReservation(newReservation);
+        decrementPrintLevel(); // 4
+        
+        return newReservation;
     }
-
-    private void reserveElementForAgent(FARAgent agent, ReservationType reservationType, Reservation previousReservation) {
+    
+    private Reservation reserveElementForAgent(FARAgent agent, ReservationType reservationType, Reservation previousReservation, Element elementToBeReserved, Element proxyTarget) {
         //if (reservationType == ReservationType.WAIT) reservationElement.getFARExtension().setIsWait(true);
 
         int currentStep;
-        int reservationIndex;
         Element comingFrom;
         
-        if (/*reservationType == ReservationType.INITIAL && */previousReservation == null) {
+        if (previousReservation == null) {
             currentStep = 0;
-            reservationIndex = RESERVATION_DEPTH-agent.getAgentGroup()-1;
             comingFrom = agent.START;
         }
         else {
             currentStep = previousReservation.getStep() + 1;
-            reservationIndex = (previousReservation.getReservationIndex() + 1) % RESERVATION_DEPTH;
             comingFrom = previousReservation.getElement();
         }
         
-        // adding to agent path
-        /*List agentPath;
-        if (reservationType == ReservationType.INITIAL && previousReservation == null) agentPath = agent.getAgentPath();
-        else agentPath = previousReservation.getReservationPath();*/
-        
-        Element elementToBeReserved;
-        if (reservationType == ReservationType.INITIAL) {
-            elementToBeReserved = comingFrom;
-            agent.insertPathElement(currentStep, elementToBeReserved);
-        }
-        else if (reservationType == ReservationType.WAIT) {
-            elementToBeReserved = comingFrom;
-            agent.insertPathElement(currentStep, elementToBeReserved);
-        }
-        else if (reservationType == ReservationType.NORMAL) {
-            elementToBeReserved = agent.getPathElement(currentStep);
-        }
-        else {
-            throw new RuntimeException();
-        }
-
         // making corresponding reservation
-        Reservation newReservation = new Reservation(reservationType, elementToBeReserved, agent, reservationIndex, currentStep, previousReservation);
-        //newReservation.setReservationPath(agentPath);
+        Reservation newReservation = new Reservation(reservationType, elementToBeReserved, agent, currentStep, previousReservation, proxyTarget);
 
         Reservation newGhostReservation = null;
         if (previousReservation != null) {
             if (elementToBeReserved != comingFrom) {
-                newGhostReservation = new Reservation(ReservationType.GHOST, comingFrom, agent, reservationIndex, currentStep);
+                // like a wait reservation
+                newGhostReservation = new Reservation(ReservationType.GHOST, comingFrom, agent, currentStep, previousReservation, null);
                 newGhostReservation.setOriginalReservation(newReservation);
             }
         }
         newReservation.setGhostReservation(newGhostReservation);
 
-        // adding reservation to element
+        // adding reservations to elements
         elementToBeReserved.getFARExtension().setReservation(currentStep, newReservation);
         comingFrom.getFARExtension().setGhostReservation(currentStep, newGhostReservation);
 
-        // linking reservation
+        // adding reservation to agent
         if (previousReservation != null) previousReservation.setDependentReservation(newReservation);
-        else agent.setFirstReservation(newReservation);
+        agent.enqueueFutureReservation(newReservation);
         
-        // acknowledging reservation at the agent
-        agent.setLastReservation(newReservation);
+        return newReservation;
     }
-
-    private void evictObstructingReservation(Reservation obstructingReservation) {
+    
+    private Reservation evictObstructingReservation(Reservation obstructingReservation) {
         FARAgent obstructingAgent = obstructingReservation.getAgent();
 
+        Reservation preObstructingReservation = obstructingReservation.getPreviousReservation();
+        
         // determine what to remove
         Reservation reservationToRemove = obstructingReservation;
-        Reservation ghostReservationToRemove = obstructingReservation.getGhostReservation();
-        System.out.println("\t\t\t\t\t"+(RESERVATION_DEPTH-obstructingReservation.getReservationIndex())+" reservations should be removed:");
-        //reservationToRemove.getAgent().setLastReservation(reservationToRemove.getPreviousReservation()); // set the removed agent's last reservation to be the last one that was not removed
+        Reservation ghostReservationToRemove = obstructingReservation.getGhostReservation(); // may be null
 
-        // going down the dependecy chain of reservations
         int removeStep = reservationToRemove.getStep();
+        
+        incrementPrintLevel(); // 4
+        
+        // going down the dependecy chain of reservations
         int counter = 0;
-        while (reservationToRemove != null) {
-            System.out.println("\t\t\t\t\t\tRemoving reservation: "+reservationToRemove);
-            
+        while (reservationToRemove != null) {            
             reservationToRemove.getElement().getFARExtension().setReservation(removeStep + counter, null);
-            ghostReservationToRemove.getElement().getFARExtension().setGhostReservation(removeStep + counter, null);
-            
+            if (ghostReservationToRemove != null) {
+                //printToScreen("Removing ghost reservation (element): "+ghostReservationToRemove);
+                ghostReservationToRemove.getElement().getFARExtension().setGhostReservation(removeStep + counter, null);
+                //printToScreen("Element check: "+ghostReservationToRemove.getElement().getFARExtension().getGhostReservation(removeStep + counter));
+            }
+                        
             reservationToRemove = reservationToRemove.getDependentReservation();
-            counter += 1;
-            
-            // memory leaks
+            counter += 1;            
         }
-
-        // consolidate the path of the agent
-        Reservation preObstructingReservation = obstructingReservation.getPreviousReservation();
-
-        // set the pre-obstructing reservation to be the last reservation of the agent
+        
+        // consolidate the agent
         preObstructingReservation.setDependentReservation(null);
-        obstructingAgent.setLastReservation(preObstructingReservation);
-
-        // add the reservation back to reservation order queue
-        agentReservationOrderAtStep.enqueue(obstructingAgent, preObstructingReservation.getStep() + 1);
+        Reservation firstRemovedReservation = obstructingAgent.removeFutureReservations(removeStep);
+        
+        decrementPrintLevel(); // 3
+        
+        // add the agent back to reservation order queue
+        int enqueueStep = removeStep - 1;
+        agentReservationOrder.enqueue(obstructingAgent, enqueueStep);
+        
+        // if removing a proxy path, the path needs to be repaired
+        // but only after the reservation that started this is fulfilled!
+        return firstRemovedReservation;
     }
 
     private void fieldFlowAnnotation() {
@@ -1050,13 +1279,107 @@ public class FARPathfinder implements Pathfinder {
         }
     }
 
+    private int getReservationIndex(FARAgent agent, int step) {
+        // could be made more efficient by caching
+        if (step < simulationStep) throw new RuntimeException();
+        
+        IntegerList tempAgentGroupOrder = new IntegerList();
+        for (int i = 0; i < agentGroupOrder.size(); i++) {
+            int currentAgentGroup = agentGroupOrder.getNodeValue(i);
+            tempAgentGroupOrder.insertAtRear(currentAgentGroup);
+        }
+        
+        int stepsBetween = step - simulationStep;
+        for (int i = 0; i < stepsBetween; i++) {
+            int firstAgentGroup = tempAgentGroupOrder.removeFirst();
+            tempAgentGroupOrder.insertAtRear(firstAgentGroup);
+        }
+        
+        int reservationIndex = tempAgentGroupOrder.search(agent.getAgentGroup());
+        return reservationIndex;
+    }
+
+    private List getProxyStarts(Element element, int step, Element excludeElement) {        
+        List proxyStarts = new List();
+        List accessibleElements = element.getFARExtension().getAccessibleElements();
+
+        //incrementPrintLevel(); // 5
+        //printToScreen("Checking proxy availability at step "+step);
+        
+        //incrementPrintLevel(); // 6
+        for (int i = 0; i < accessibleElements.size(); i++) {
+            Element currentAccessible = (Element) accessibleElements.getNodeData(i);
+            // for each accessible element
+            
+            if (currentAccessible == excludeElement) {
+                // if current accessible is the excluded element, ignore it
+                continue;
+            }
+            
+            if (currentAccessible.getFARExtension().getReservation(step) == null) {
+                // if there is no reservation at the element yet
+                
+                if (currentAccessible.getFARExtension().getGhostReservation(step) == null) {
+                    // if there is no ghost reservation either at the element
+                    //printToScreen("Completely available proxy start: "+currentAccessible);
+                    proxyStarts.insertAtFront(currentAccessible);
+                    // the accessible element can be used as proxy start!
+                }
+                
+                else if (currentAccessible.getFARExtension().getGhostReservation(step).getOriginalReservation().getElement() != element) {
+                    // if there is a ghost reservation at the element
+                    //printToScreen("Ghost-occupied proxy start: "+currentAccessible);
+                    proxyStarts.insertAtFront(currentAccessible);
+                    // the accessible element can be used as proxy start
+                    // as long as the original element of the ghost is not this element!
+                    // prevents head-on collisions
+                }
+            }
+        }
+        //decrementPrintLevel(); // 5
+        
+        //decrementPrintLevel(); // 4
+
+        return proxyStarts;
+    }
+    
+    private Element getRandomProxyStart(List proxyStarts) {
+        int randomProxyStartIndex = (int) (Math.random() * (proxyStarts.size()));
+        return (Element) proxyStarts.getNodeData(randomProxyStartIndex);
+    }
+
+    private List getProxyPath(Element proxyStart, Element proxyTarget) {
+        // returns a new path, starting from first available proxy spot, and ending at this element
+        // note that step should be the step BEFORE the step the proxy is needed to start on
+        FAR farAlgorithm = new FAR();
+        List proxyPath = farAlgorithm.far(proxyStart, proxyTarget, field);
+        return proxyPath;
+    }
+    
+    public void printToScreen(String printString) {
+        String whitespaceString = "";
+        for (int i = 0; i < printLevel; i++) {
+            //whitespaceString += "\t";
+            whitespaceString += "    ";
+        }
+        System.out.println(whitespaceString + printString);
+    }
+    
+    private void incrementPrintLevel() {
+        printLevel += 1;
+    }
+    
+    private void decrementPrintLevel() {
+        printLevel -= 1;
+    }
+    
     private void updateInfo() {
-        gui.getInfoStepTF().setText(simStep + "");
+        gui.getInfoStepTF().setText(simulationStep + "");
         gui.getInfoSuccessTF().setText(numSuccesses + "");
         gui.getInfoTimeTF().setText(((System.currentTimeMillis() - startTime) / 1000) + "");
     }
 
     @Override public String toString() {
-        return ("Pathfinder at step " + simStep + ": Number of FARAgents: " + farAgents.length);
+        return ("Pathfinder at step " + simulationStep + ": Number of FARAgents: " + farAgents.length);
     }
 }

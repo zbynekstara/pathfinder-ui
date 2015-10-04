@@ -29,8 +29,6 @@ public class FARExtension {
 
         this.thisElement = thisElement;
 
-        //reservationDepth = farPathfinder.RESERVATION_DEPTH;
-
         reservations = new Reservation[FARPathfinder.FAILURE_CRITERION+1];
         for (int i = 0; i <= FARPathfinder.FAILURE_CRITERION; i++) {
             reservations[i] = null;
@@ -97,62 +95,6 @@ public class FARExtension {
         if (extraVerticalAccessTo != null) accessibleList.insertAtFront(extraVerticalAccessTo);
 
         return accessibleList;
-    }
-
-    public List getUnreservedElements(int step) {
-        List unreservedList = new List();
-        List accessibleList = getAccessibleElements();
-
-        for (int i = 0; i < accessibleList.size(); i++) {
-            Element currentAccessible = (Element) accessibleList.getNodeData(i);
-            // for each accessible element
-            
-            if (currentAccessible.getFARExtension().getReservation(step) == null) {
-                // if there is no reservation at the element yet
-                
-                if (getGhostReservation(step) == null) {
-                    // if there is no ghost reservation either at the element
-                    unreservedList.insertAtFront(currentAccessible);
-                    // the accessible element can be used as proxy start!
-                }
-                else if (getGhostReservation(step).getOriginalReservation().getElement() != thisElement) {
-                    // if there is a ghost reservation at the element
-                    unreservedList.insertAtFront(currentAccessible);
-                    // the accessible element can be used as proxy start
-                    // as long as the original element of the ghost is not this element!
-                    // prevents head-on collisions
-                }
-            }
-        }
-
-        return unreservedList;
-    }
-
-    public boolean isProxyAvailable(int step) {
-        // looks at the step layer around (but not including) an element
-        // if there is a place to go that is not reserved yet, returns true
-        // should be used when moving from [element,step-1] to [proxy?,step]
-        
-        if (getUnreservedElements(step).isEmpty()) return false;
-        else return true;
-    }
-
-    public List getProxyPath(int step) {
-        // returns a new path, starting from first available proxy spot, and ending at this element
-        if (isProxyAvailable(step)) {
-            FAR farAlgorithm = new FAR();
-
-            Element proxyStart = (Element) getUnreservedElements(step).getNodeData(0);
-            // PROBLEM WITH HEAD-ON COLLISIONS - should be solved by the ghost reservation condition in getUnreservedElements
-            Element proxyEnd = thisElement;
-
-            System.out.println("\t\t\t\t\tFinding proxy path with start at "+proxyStart+" and end at "+proxyEnd);
-            List proxyPath = farAlgorithm.far(proxyStart, proxyEnd, field);
-
-            return proxyPath;
-        } else {
-            return null;
-        }
     }
 
     public String printReservations() {

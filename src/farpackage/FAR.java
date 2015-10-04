@@ -22,6 +22,8 @@ public class FAR {
     }
 
     public List far(Element start, Element goal, Field field) {
+        // returns path from start to goal, inclusively
+        
         HashSet closedSet = new HashSet((field.X_DIMENSION - 2) * (field.Y_DIMENSION - 2)); // The set of nodes already evaluated.
         // ORDERED BY ELEMENT KEYS
         MinimalQueue openSet = new MinimalQueue(); // The set of tentative nodes to be evaluated, initially containing the start node
@@ -94,82 +96,6 @@ public class FAR {
         }
         return null;
     }
-
-    /*private Element openSetChooser(Field field, MinimalQueue openSet, HashSet closedSet) { // THIS IS WRONG, IF YOU WANT TO ADD THIS, CHANGE THIS
-        System.out.println("\t\t\t\t\t\tNew openSetChooser session"); // make a list of tried elements
-
-        Element currentElement = null;
-        Element previousElement = null;
-        Element firstElement = null;
-
-        HashSet triedElements = new HashSet(openSet.size());
-
-        //int counter = 0;
-
-        do {
-            previousElement = currentElement;
-
-            do {
-                currentElement = (Element) openSet.dequeue();
-                System.out.println("\t\t\t\t\t\t\tDequeued "+currentElement+" from openSet ("+currentElement.getAExtension().getFScore()+")");
-            } while (closedSet.contains(currentElement.getKey(field.Y_DIMENSION)));
-
-            System.out.println("\t\t\t\t\t\t\t\tProceeded with "+currentElement);
-
-
-            if (counter == 0) {
-                System.out.println("\t\t\t\t\t\t\t\tCurrent element is the first element");
-                firstElement = currentElement;
-            }
-
-            if (currentElement.getAExtension().getCameFrom() != null) {
-                if (currentElement.getAExtension().getCameFrom().getAExtension().getCameFrom() != null) {
-                    if (currentElement.getAExtension().getCameFrom().isEqual(field.getNorthElement(currentElement))
-                            && currentElement.getAExtension().getCameFrom().getAExtension().getCameFrom().isEqual(field.getNorthElement(field.getNorthElement(currentElement)))) {
-                            // if element's cameFrom and its cameFrom are from the same direction
-
-                        System.out.println("\t\t\t\t\t\t\t\tCurrent element chosen1");
-                        return currentElement;
-                    } else if (currentElement.getAExtension().getCameFrom().isEqual(field.getEastElement(currentElement))
-                            && currentElement.getAExtension().getCameFrom().getAExtension().getCameFrom().isEqual(field.getEastElement(field.getEastElement(currentElement)))) {
-
-                        System.out.println("\t\t\t\t\t\t\t\tCurrent element chosen2");
-                        return currentElement;
-                    } else if (currentElement.getAExtension().getCameFrom().isEqual(field.getSouthElement(currentElement))
-                            && currentElement.getAExtension().getCameFrom().getAExtension().getCameFrom().isEqual(field.getSouthElement(field.getSouthElement(currentElement)))) {
-
-                        System.out.println("\t\t\t\t\t\t\t\tCurrent element chosen3");
-                        return currentElement;
-                    } else if (currentElement.getAExtension().getCameFrom().isEqual(field.getWestElement(currentElement))
-                            && currentElement.getAExtension().getCameFrom().getAExtension().getCameFrom().isEqual(field.getWestElement(field.getWestElement(currentElement)))) {
-
-                        System.out.println("\t\t\t\t\t\t\t\tCurrent element chosen4");
-                        return currentElement;
-                    } else { // if element's cameFrom and its cameFrom are not from the same direction
-                        // put at the end of candidates with the same fScore - only if none of the others offers a straight path, this is selected
-                        System.out.println("\t\t\t\t\t\t\t\tCurrent element re-enqueued");
-                        openSet.enqueue(currentElement, currentElement.getAExtension().getFScore());
-                    }
-                } else {
-                    System.out.println("\t\t\t\t\t\t\t\tFirst element chosen1");
-                    return firstElement;
-                }
-            } else {
-                System.out.println("\t\t\t\t\t\t\t\tFirst element chosen2");
-                return firstElement;
-            }
-
-            counter++;
-        } while (((!currentElement.isEqual(firstElement)) || (counter == 1)) && (!currentElement.isEqual(previousElement)));
-            // the first condition is there to break the cycle of looking for a straight path when there is none
-            // the second condition is there to ensure the cycle is not ended with the first try - when the current and first are the same by definition
-            // the third condition is there to ensure the cycle is ended when we find the best way and it's not the first element
-
-        //if (!openSet.isEmpty()) openSet.dequeue(); // to remove the re-enqueued element
-
-        System.out.println("\t\t\t\t\t\t\t\tCurrent element chosen5");
-        return currentElement;
-    }*/
 
     private List reconstructPath(Element startNode, Element currentNode) {
         List path;

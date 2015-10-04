@@ -1,25 +1,23 @@
 package adtpackage;
 
-import generalpackage.Printable;
-
 /**
  *
  * @author Zbyněk Stara
  */
-public class List implements Printable {
-    private class Node <T extends Printable> {
-        private T data = null;
+public class IntegerList {
+    private class Node {
+        private Integer value;
         private Node next = null;
 
-        private Node(T data) {
-            this.data = data;
+        private Node(int value) {
+            this.value = value;
         }
     }
 
     private Node head = null;
     private int size = 0;
 
-    public List() {
+    public IntegerList() {
         head = null;
     }
 
@@ -31,31 +29,31 @@ public class List implements Printable {
         return size;
     }
 
-    public <T extends Printable> void insertAtFront(T data) {
-        Node newNode = new Node(data);
+    public void insertAtFront(int value) {
+        Node newNode = new Node(value);
         newNode.next = head;
         head = newNode;
         size += 1;
     }
 
-    public <T extends Printable> void insertAtRear(T data) {
+    public void insertAtRear(int value) {
         if (isEmpty()) {
-            head = new Node(data);
+            head = new Node(value);
         } else {
             Node current = head;
             while (current.next != null) {
                 current = current.next;
             }
-            current.next = new Node(data);
+            current.next = new Node(value);
         }
         size += 1;
     }
 
-    public <T extends Printable> void insertAsNode(T data, int node) {
-        // insert the data to be the node at specified index
+    public void insertAsNode(int value, int node) {
+        // insert the value to be the node at specified index
         // whatever might have been there is moved back
         if (node == 0) {
-            insertAtFront(data);
+            insertAtFront(value);
         } else if((!isEmpty()) && (node < size)) {
             Node current = head;
             for (int i = 1; i < node; i++) {
@@ -63,50 +61,50 @@ public class List implements Printable {
             }
 
             Node temp = current.next;
-            current.next = new Node(data);
+            current.next = new Node(value);
             current.next.next = temp;
 
             size += 1;
         } else {
-            insertAtRear(data);
+            insertAtRear(value);
         }
     }
     
-    public <T extends Printable> int search(T data) {
+    public int search(int value) {
         if (isEmpty()) {
             return -1;
         } else {
             Node current = head;
 
             int counter = 0;
-            while (current.data != data && current.next != null) {
+            while (current.value != value && current.next != null) {
                 counter++;
                 current = current.next;
             }
 
-            if (current.data == data) return counter;
+            if (current.value == value) return counter;
             else return -1;
         }
     }
 
-    public Object removeFirst() {
+    public Integer removeFirst() {
         if (isEmpty()) {
             return null;
         }
         Node first = head;
         head = head.next;
         size -= 1;
-        return first.data;
+        return first.value;
     }
 
-    public Object removeLast() {
+    public Integer removeLast() {
         if (isEmpty()) {
             return null;
         }
         Node current = head;
         if (current.next == null) {
             head = null;
-            return current.data;
+            return current.value;
         }
         Node previous = null;
         while (current.next != null) {
@@ -115,10 +113,10 @@ public class List implements Printable {
         }
         previous.next = null;
         size -= 1;
-        return current.data;
+        return current.value;
     }
 
-    public Object removeNode(int node) {
+    public Integer removeNode(int node) {
         if ((!isEmpty()) && (node < size)) {
             Node current = head;
             if (node == 0) {
@@ -135,47 +133,43 @@ public class List implements Printable {
             Node temp = current;
             previous.next = current.next;
             size -= 1;
-            return temp.data;
+            return temp.value;
         } else {
             return null;
         }
     }
 
-    public Object getNodeData(int node) {
+    public Integer getNodeValue(int node) {
         if ((!isEmpty()) && (node < size)) {
             Node current = head;
             for (int i = 0; i < node; i++) {
                 current = current.next;
             }
-            return current.data;
+            return current.value;
         } else {
             return null;
         }
     }
     
-    public Object getLastNodeData() {
-        return getNodeData(size-1);
-    }
-
-    @Override public String print() {
-        return toString();
+    public Integer getLastNodeValue() {
+        return getNodeValue(size-1);
     }
 
     @Override public String toString() {
         if (!isEmpty()) {
             String printedNodes = "";
             for (int i = 0; i < (size - 1); i++) {
-                printedNodes = (printedNodes+"{"+printNodeData(i)+"}, ");
+                printedNodes = (printedNodes+"{"+printNodeValue(i)+"}, ");
             }
-            printedNodes = (printedNodes+"{"+printNodeData(size - 1)+"}");
-            return ("List size: "+size+"; List contents: ["+printedNodes+"]");
+            printedNodes = (printedNodes+"{"+printNodeValue(size - 1)+"}");
+            return ("IntegerList size: "+size+"; IntegerList contents: ["+printedNodes+"]");
         } else {
-            return ("List is empty");
+            return ("IntegerList is empty");
         }
     }
 
-    private <T extends Printable> String printNodeData(int node) {
-        if (getNodeData(node) == null) return null;
-        else return ((T) getNodeData(node)).print();
+    private String printNodeValue(int node) {
+        if (getNodeValue(node) == null) return null;
+        else return getNodeValue(node).toString();
     }
 }

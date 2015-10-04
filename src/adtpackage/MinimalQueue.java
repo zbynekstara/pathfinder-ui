@@ -204,6 +204,18 @@ public class MinimalQueue implements Printable {
             return null;
         }
     }
+    
+    public double getNodeKey(int node) {
+        if ((!isEmpty()) && (node < size)) {
+            Node current = head;
+            for (int i = 0; i < node; i++) {
+                current = current.next;
+            }
+            return current.key;
+        } else {
+            return -1;
+        }
+    }
 
     @Override public String print() {
         return toString();
@@ -213,16 +225,20 @@ public class MinimalQueue implements Printable {
         if (!isEmpty()) {
             String printedNodes = "";
             for (int i = 0; i < (size - 1); i++) {
-                printedNodes = (printedNodes + "{" + printNode(i) + "}, ");
+                printedNodes = (printedNodes+"{"+printNodeData(i)+"}<"+printNodeKey(i)+">, ");
             }
-            printedNodes = (printedNodes + "{" + printNode(size - 1) + "}");
-            return ("List size: " + size + "; List contents: [" + printedNodes + "]");
+            printedNodes = (printedNodes+"{"+printNodeData(size - 1)+"}<"+printNodeKey(size - 1)+">");
+            return ("MinimalQueue size: "+size+"; MinimalQueue contents: ["+printedNodes+"]");
         } else {
-            return ("List is empty");
+            return ("MinimalQueue is empty");
         }
     }
 
-    private <T extends Printable> String printNode(int node) {
+    private <T extends Printable> String printNodeData(int node) {
         return ((T) getNodeData(node)).print();
+    }
+    
+    private String printNodeKey(int node) {
+        return getNodeKey(node)+"";
     }
 }
